@@ -48,17 +48,12 @@
       <section class="step is-disabled" id="artStep">
         <div class="step-heading"><span>03</span><h2>Add framed art</h2></div>
         <p>Use transparent PNGs photographed straight-on. Enter each frame’s outside dimensions.</p>
+        <p class="unit-note">Frame dimensions are in <strong id="artUnitLabel">cm</strong>.</p>
         <label class="upload-control">
           <input id="artInput" type="file" accept="image/png,image/webp" multiple disabled />
           <span>Add frame images</span>
         </label>
         <div id="pendingArt" class="pending-art"></div>
-        <div class="art-library-heading">
-          <span>Frames</span><span id="frameCount">0</span>
-        </div>
-        <div id="artLibrary" class="art-library">
-          <div class="empty-library">Your scaled frames will appear here.</div>
-        </div>
       </section>
     </aside>
 
@@ -88,6 +83,17 @@
       </div>
       <p class="keyboard-note">Select a frame to move it with arrow keys. Press Delete to remove it.</p>
     </section>
+
+    <aside class="frame-sidebar" aria-label="Scaled frame library">
+      <div class="frame-sidebar-title">
+        <div><p class="eyebrow">Your collection</p><h2>Frames</h2></div>
+        <span id="frameCount">0</span>
+      </div>
+      <p class="frame-help">Drag a frame onto the wall, or double-click to place it in the centre.</p>
+      <div id="artLibrary" class="art-library">
+        <div class="empty-library">Your scaled frames will appear here.</div>
+      </div>
+    </aside>
   </main>
 
   <dialog id="confirmDialog">

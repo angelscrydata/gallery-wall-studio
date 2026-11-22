@@ -12,7 +12,7 @@ const els = {
   knownLength: $('#knownLength'), unitSelect: $('#unitSelect'), applyScaleButton: $('#applyScaleButton'),
   scaleStatus: $('#scaleStatus'), measurementLayer: $('#measurementLayer'), measurementLine: $('#measurementLine'),
   measureStart: $('#measureStart'), measureEnd: $('#measureEnd'), artInput: $('#artInput'),
-  pendingArt: $('#pendingArt'), artLibrary: $('#artLibrary'), frameCount: $('#frameCount'), placedArt: $('#placedArt'),
+  pendingArt: $('#pendingArt'), artLibrary: $('#artLibrary'), frameCount: $('#frameCount'), artUnitLabel: $('#artUnitLabel'), placedArt: $('#placedArt'),
   canvasHint: $('#canvasHint'), zoomIn: $('#zoomIn'), zoomOut: $('#zoomOut'), zoomLabel: $('#zoomLabel'),
   exportButton: $('#exportButton'), resetButton: $('#resetButton'), confirmDialog: $('#confirmDialog')
 };
@@ -88,6 +88,20 @@ els.measurementLayer.addEventListener('pointerup', (event) => {
   measureDraft = null; els.measurementLayer.classList.remove('is-drawing'); els.drawScaleButton.textContent = 'Redraw measurement line';
 });
 els.knownLength.addEventListener('input', () => { els.applyScaleButton.disabled = !(state.scaleLine && Number(els.knownLength.value) > 0); });
+els.unitSelect.addEventListener('change', () => {
+  updateUnitLabels();
+  if (state.pixelsPerUnit) {
+    state.pixelsPerUnit = null;
+    els.artStep.classList.add('is-disabled'); els.artInput.disabled = true;
+    els.scaleStatus.textContent = 'Unit changed · apply the scale again.';
+  }
+});
+
+function updateUnitLabels() {
+  const unit = els.unitSelect.value;
+  els.artUnitLabel.textContent = unit;
+  document.querySelectorAll('.dimension-unit').forEach(label => label.textContent = ` (${unit})`);
+}
 
 els.applyScaleButton.addEventListener('click', () => {
   const length = Number(els.knownLength.value); if (!state.scaleLine || length <= 0) return;
@@ -108,7 +122,7 @@ els.artInput.addEventListener('change', async () => {
 async function createPendingArt(file) {
   const url = await readFile(file); const id = crypto.randomUUID();
   const card = document.createElement('div'); card.className = 'pending-card'; card.dataset.id = id;
-  card.innerHTML = `<img class="pending-preview" alt="Preview of ${escapeHtml(file.name)}"><p class="pending-name">${escapeHtml(file.name)}</p><div class="dimension-row"><label>Width<input class="art-width" type="number" min="0.1" step="0.1" placeholder="40"></label><label>Height<input class="art-height" type="number" min="0.1" step="0.1" placeholder="50"></label></div><div class="pending-actions"><button class="button button-outline cancel-art" type="button">Cancel</button><button class="button button-dark add-art" type="button">Add frame</button></div>`;
+  card.innerHTML = `<img class="pending-preview" alt="Preview of ${escapeHtml(file.name)}"><p class="pending-name">${escapeHtml(file.name)}</p><div class="dimension-row"><label>Width<span class="dimension-unit"> (${state.unit})</span><input class="art-width" type="number" min="0.1" step="0.1" placeholder="40"></label><label>Height<span class="dimension-unit"> (${state.unit})</span><input class="art-height" type="number" min="0.1" step="0.1" placeholder="50"></label></div><div class="pending-actions"><button class="button button-outline cancel-art" type="button">Cancel</button><button class="button button-dark add-art" type="button">Add frame</button></div>`;
   card.querySelector('img').src = url;
   card.querySelector('.cancel-art').onclick = () => card.remove();
   card.querySelector('.add-art').onclick = () => {
@@ -169,11 +183,15 @@ function beginFrameDrag(event) {
 }
 function moveFrame(event) {
   if (!drag) return; const { item } = drag;
-  item.x = Math.max(0, Math.min(els.stage.clientWidth - item.width, drag.originX + (event.clientX - drag.startX) / state.zoom));
-  item.y = Math.max(0, Math.min(els.stage.clientHeight - item.height, drag.originY + (event.clientY - drag.startY) / state.zoom));
-  event.currentTarget.style.left = `${item.x}px`; event.currentTarget.style.top = `${item.y}px`;
+  drag.nextX = Math.max(0, Math.min(els.stage.clientWidth - item.width, drag.originX + (event.clientX - drag.startX) / state.zoom));
+  drag.nextY = Math.max(0, Math.min(els.stage.clientHeight - item.height, drag.originY + (event.clientY - drag.startY) / state.zoom));
+  event.currentTarget.style.transform = `translate3d(${drag.nextX - drag.originX}px, ${drag.nextY - drag.originY}px, 0)`;
 }
-function endFrame(event) { event.currentTarget.removeEventListener('pointermove', moveFrame); drag = null; renderPlaced(); }
+function endFrame(event) {
+  event.currentTarget.removeEventListener('pointermove', moveFrame);
+  if (drag) { drag.item.x = drag.nextX ?? drag.originX; drag.item.y = drag.nextY ?? drag.originY; }
+  drag = null; renderPlaced();
+}
 
 document.addEventListener('keydown', event => {
   if (!state.selectedId || ['INPUT','SELECT'].includes(document.activeElement.tagName)) return;
