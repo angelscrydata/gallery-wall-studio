@@ -24,6 +24,13 @@
         <h1>Compose your wall,<br />before the first nail.</h1>
       </div>
 
+      <div class="sidebar-tabs" role="tablist" aria-label="Wall projects">
+        <button class="sidebar-tab is-active" id="planTab" role="tab" aria-selected="true" aria-controls="planPanel">Current wall</button>
+        <button class="sidebar-tab" id="historyTab" role="tab" aria-selected="false" aria-controls="historyPanel">Previous walls</button>
+      </div>
+
+      <div class="sidebar-panel" id="planPanel" role="tabpanel" aria-labelledby="planTab">
+
       <section class="step" id="wallStep">
         <div class="step-heading"><span>01</span><h2>Your wall</h2></div>
         <p>Choose a straight-on photo that includes an object of known length.</p>
@@ -55,6 +62,21 @@
         </label>
         <div id="pendingArt" class="pending-art"></div>
       </section>
+      </div>
+
+      <div class="sidebar-panel" id="historyPanel" role="tabpanel" aria-labelledby="historyTab" hidden>
+        <div class="history-heading">
+          <div><p class="eyebrow">Saved on this device</p><h2>Previous walls</h2></div>
+          <div class="view-toggle" aria-label="Library view">
+            <button class="is-active" id="gridViewButton" type="button" aria-label="Grid view">▦</button>
+            <button id="listViewButton" type="button" aria-label="List view">☰</button>
+          </div>
+        </div>
+        <p class="history-help">Open any wall to continue exactly where you left off.</p>
+        <div class="project-library grid-view" id="projectLibrary">
+          <p class="empty-projects">Walls you work on will appear here automatically.</p>
+        </div>
+      </div>
     </aside>
 
     <section class="workspace" aria-label="Wall planning canvas">
@@ -68,8 +90,6 @@
       </div>
       <div class="stage-wrap" id="stageWrap">
         <div class="empty-state" id="emptyState">
-          <div class="empty-icon" aria-hidden="true"><span></span><span></span><span></span></div>
-          <p>Your wall is the canvas.</p>
           <label class="button button-outline">
             <input type="file" accept="image/*" id="wallInputEmpty" />
             Choose a photo
