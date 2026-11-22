@@ -61,13 +61,13 @@ input[type="number"], select { width: 100%; border: 1px solid var(--line); backg
 .project-card { min-width: 0; border: 1px solid var(--line); background: var(--white); }
 .project-open { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; }
 .project-thumb { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #e8e3da; }
-.project-meta { padding: 9px 9px 5px; }
+.project-meta { display: block; padding: 14px 16px 12px; }
 .project-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 1rem Georgia, serif; }
 .project-date { display: block; margin-top: 4px; color: var(--muted); font-size: .68rem; }
-.project-rename { width: 100%; border: 0; border-top: 1px solid var(--line); background: transparent; padding: 7px 9px; cursor: pointer; text-align: left; color: var(--muted); font-size: .7rem; }
+.project-rename { width: 100%; border: 0; border-top: 1px solid var(--line); background: transparent; padding: 11px 16px; cursor: pointer; text-align: left; color: var(--muted); font-size: .7rem; }
 .project-rename-form { display: flex; gap: 5px; padding: 7px; border-top: 1px solid var(--line); }
-.project-rename-form input { min-width: 0; width: 100%; border: 1px solid var(--line); padding: 5px 7px; background: var(--panel); }
-.project-rename-form button { border: 0; background: var(--ink); color: var(--white); padding: 0 8px; cursor: pointer; }
+.project-rename-form input { min-width: 0; width: 100%; border: 1px solid var(--line); padding: 5px 7px; background: var(--panel); font-size: .75rem; line-height: 1.2; }
+.project-rename-form button { border: 0; background: var(--ink); color: var(--white); padding: 0 8px; cursor: pointer; font-size: .72rem; line-height: 1.2; }
 .list-view .project-card { display: grid; grid-template-columns: 74px minmax(0, 1fr); }
 .list-view .project-open { display: grid; grid-template-columns: 74px minmax(0, 1fr); grid-column: 1 / -1; }
 .list-view .project-thumb { width: 74px; height: 62px; aspect-ratio: auto; }
@@ -89,7 +89,8 @@ input[type="number"], select { width: 100%; border: 1px solid var(--line); backg
 .art-library { display: grid; grid-template-columns: 1fr; gap: 10px; padding-top: 12px; }
 .empty-library { grid-column: 1 / -1; color: var(--muted); font: italic .9rem Georgia, serif; padding: 12px 0; }
 .library-frame { border: 1px solid var(--line); background: var(--white); padding: 8px; cursor: grab; text-align: center; position: relative; }
-.library-frame img { height: 82px; width: 100%; object-fit: contain; display: block; }
+.library-frame-preview { position: relative; height: 82px; overflow: hidden; }
+.library-frame img { position: absolute; inset: 0; height: 100%; width: 100%; object-fit: fill; display: block; transform-origin: center; }
 .library-frame span { display: block; margin-top: 6px; color: var(--muted); font-size: .68rem; }
 .workspace { min-width: 0; min-height: 0; padding: 24px 28px 12px; display: flex; flex-direction: column; overflow: hidden; }
 .workspace-tools { min-height: 42px; display: flex; justify-content: space-between; align-items: flex-start; }
@@ -122,8 +123,15 @@ dialog form > p:not(.eyebrow) { color: var(--muted); line-height: 1.5; }
 .frame-editor-dialog { width: min(540px, calc(100% - 32px)); }
 .editor-heading { display: flex; justify-content: space-between; align-items: flex-start; }
 .editor-close { width: 36px; height: 36px; border: 0; background: transparent; font-size: 1.6rem; cursor: pointer; }
-.editor-preview { position: relative; width: min(280px, 100%); aspect-ratio: 4 / 3; margin: 22px auto; overflow: hidden; background-color: #ece8df; background-image: linear-gradient(45deg,#ddd7cc 25%,transparent 25%),linear-gradient(-45deg,#ddd7cc 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ddd7cc 75%),linear-gradient(-45deg,transparent 75%,#ddd7cc 75%); background-size: 18px 18px; background-position: 0 0,0 9px,9px -9px,-9px 0; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
-.editor-preview img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; transform-origin: center; }
+.crop-canvas { position: relative; width: min(400px, 100%); margin: 22px auto 8px; overflow: hidden; background-color: #ece8df; background-image: linear-gradient(45deg,#ddd7cc 25%,transparent 25%),linear-gradient(-45deg,#ddd7cc 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ddd7cc 75%),linear-gradient(-45deg,transparent 75%,#ddd7cc 75%); background-size: 18px 18px; background-position: 0 0,0 9px,9px -9px,-9px 0; box-shadow: 0 8px 24px rgba(0,0,0,.12); touch-action: none; user-select: none; }
+.crop-canvas > img { display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.crop-box { position: absolute; border: 2px solid var(--white); box-shadow: 0 0 0 999px rgba(23,23,21,.48), inset 0 0 0 1px rgba(23,23,21,.4); cursor: move; }
+.crop-box i { position: absolute; width: 15px; height: 15px; border: 2px solid var(--ink); background: var(--white); border-radius: 50%; }
+.crop-box i[data-handle="nw"] { left: -8px; top: -8px; cursor: nwse-resize; }
+.crop-box i[data-handle="ne"] { right: -8px; top: -8px; cursor: nesw-resize; }
+.crop-box i[data-handle="se"] { right: -8px; bottom: -8px; cursor: nwse-resize; }
+.crop-box i[data-handle="sw"] { left: -8px; bottom: -8px; cursor: nesw-resize; }
+.crop-help { margin: 0 auto 22px; max-width: 400px; text-align: center; font-size: .76rem; }
 .editor-controls { display: grid; gap: 16px; }
 .editor-controls label { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
 .editor-controls output { float: right; color: var(--ink); }

@@ -19,9 +19,8 @@ const els = {
   planTab: $('#planTab'), historyTab: $('#historyTab'), planPanel: $('#planPanel'), historyPanel: $('#historyPanel'),
   projectLibrary: $('#projectLibrary'), gridViewButton: $('#gridViewButton'), listViewButton: $('#listViewButton'),
   frameEditorDialog: $('#frameEditorDialog'), frameEditorForm: $('#frameEditorForm'), editorClose: $('#editorClose'),
-  editorPreview: $('#editorPreview'), editorPreviewImage: $('#editorPreviewImage'), cropZoom: $('#cropZoom'),
-  cropX: $('#cropX'), cropY: $('#cropY'), frameRotation: $('#frameRotation'), cropZoomOutput: $('#cropZoomOutput'),
-  rotationOutput: $('#rotationOutput'), editorReset: $('#editorReset')
+  cropCanvas: $('#cropCanvas'), cropBox: $('#cropBox'), editorPreviewImage: $('#editorPreviewImage'),
+  frameRotation: $('#frameRotation'), rotationOutput: $('#rotationOutput'), editorReset: $('#editorReset')
 };
 
 function readFile(file) {
@@ -98,11 +97,15 @@ async function openSavedProject(project) {
   await new Promise((resolve, reject) => { probe.onload = resolve; probe.onerror = reject; probe.src = project.wallUrl; });
   state.projectId = project.id; state.projectName = project.name; state.updatedAt = project.updatedAt;
   state.wallUrl = project.wallUrl; state.naturalWidth = project.naturalWidth || probe.naturalWidth; state.naturalHeight = project.naturalHeight || probe.naturalHeight;
-  state.unit = project.unit || 'cm'; state.pixelsPerUnit = project.pixelsPerUnit || null; state.art = project.art || []; state.zoom = 1; state.selectedId = null;
+  state.unit = project.unit || 'cm'; state.pixelsPerUnit = project.pixelsPerUnit || null; state.art = (project.art || []).map(art => ({ ...art })); state.zoom = 1; state.selectedId = null;
   els.wallImage.src = state.wallUrl; els.emptyState.hidden = true; els.stage.hidden = false; fitStage();
   const stageWidth = els.stage.clientWidth, stageHeight = els.stage.clientHeight;
   state.scaleLine = project.scaleLine ? { x1: project.scaleLine.x1 * stageWidth, y1: project.scaleLine.y1 * stageHeight, x2: project.scaleLine.x2 * stageWidth, y2: project.scaleLine.y2 * stageHeight } : null;
-  state.placed = (project.placed || []).map(item => ({ id: item.id, artId: item.artId, x: item.x * stageWidth, y: item.y * stageHeight, width: item.width * stageWidth, height: item.height * stageHeight, cropZoom: item.cropZoom || 1, cropX: item.cropX || 0, cropY: item.cropY || 0, rotation: item.rotation || 0 }));
+  (project.placed || []).forEach(item => {
+    const art = state.art.find(candidate => candidate.id === item.artId);
+    if (art && art.cropZoom === undefined) Object.assign(art, { cropZoom: item.cropZoom || 1, cropX: item.cropX || 0, cropY: item.cropY || 0, rotation: item.rotation || 0 });
+  });
+  state.placed = (project.placed || []).map(item => ({ id: item.id, artId: item.artId, x: item.x * stageWidth, y: item.y * stageHeight, width: item.width * stageWidth, height: item.height * stageHeight }));
   els.knownLength.value = project.knownLength || ''; els.unitSelect.value = state.unit; updateUnitLabels(); clearMeasurement();
   els.calibrationStep.classList.remove('is-disabled'); [els.drawScaleButton, els.knownLength, els.unitSelect].forEach(el => el.disabled = false);
   els.applyScaleButton.disabled = !state.scaleLine; els.artStep.classList.toggle('is-disabled', !state.pixelsPerUnit); els.artInput.disabled = !state.pixelsPerUnit;
@@ -233,7 +236,7 @@ async function createPendingArt(file) {
   card.querySelector('.add-art').onclick = () => {
     const width = Number(card.querySelector('.art-width').value), height = Number(card.querySelector('.art-height').value);
     if (!(width > 0 && height > 0)) { card.querySelector('.art-width').focus(); return; }
-    state.art.push({ id, url, name: file.name, width, height, unit: state.unit }); card.remove(); renderLibrary(); queueSave();
+    state.art.push({ id, url, name: file.name, width, height, unit: state.unit, cropLeft: 0, cropTop: 0, cropWidth: 1, cropHeight: 1, rotation: 0 }); card.remove(); renderLibrary(); queueSave();
   };
   els.pendingArt.append(card);
 }
@@ -244,10 +247,10 @@ function renderLibrary() {
   els.artLibrary.innerHTML = '';
   state.art.forEach(art => {
     const el = document.createElement('div'); el.className = 'library-frame'; el.draggable = true; el.tabIndex = 0;
-    el.innerHTML = `<img src="${art.url}" alt="${escapeHtml(art.name)}"><span>${art.width} × ${art.height} ${art.unit}</span>`;
+    el.innerHTML = `<div class="library-frame-preview"><img src="${art.url}" alt="${escapeHtml(art.name)}" style="${frameImageStyleText(art)}"></div><span>${art.width} × ${art.height} ${art.unit}</span>`;
     el.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', art.id));
-    el.addEventListener('dblclick', () => placeAtCenter(art.id));
-    el.addEventListener('keydown', e => { if (e.key === 'Enter') placeAtCenter(art.id); });
+    el.addEventListener('dblclick', () => openFrameEditor(art.id));
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') openFrameEditor(art.id); });
     els.artLibrary.append(el);
   });
 }
@@ -257,12 +260,11 @@ els.stage.addEventListener('drop', e => {
   e.preventDefault(); const artId = e.dataTransfer.getData('text/plain'); if (!artId) return;
   const rect = els.stage.getBoundingClientRect(); placeArt(artId, (e.clientX - rect.left) / state.zoom, (e.clientY - rect.top) / state.zoom);
 });
-function placeAtCenter(artId) { placeArt(artId, els.stage.clientWidth / 2, els.stage.clientHeight / 2); }
 function placeArt(artId, centerX, centerY) {
   const art = state.art.find(a => a.id === artId); if (!art) return;
   const naturalToDisplay = els.stage.clientWidth / state.naturalWidth;
   const width = art.width * state.pixelsPerUnit * naturalToDisplay, height = art.height * state.pixelsPerUnit * naturalToDisplay;
-  const placed = { id: crypto.randomUUID(), artId, x: centerX - width / 2, y: centerY - height / 2, width, height, cropZoom: 1, cropX: 0, cropY: 0, rotation: 0 };
+  const placed = { id: crypto.randomUUID(), artId, x: centerX - width / 2, y: centerY - height / 2, width, height };
   placed.x = Math.max(0, Math.min(els.stage.clientWidth - width, placed.x)); placed.y = Math.max(0, Math.min(els.stage.clientHeight - height, placed.y));
   state.placed.push(placed); state.selectedId = placed.id; renderPlaced(); queueSave();
 }
@@ -272,39 +274,78 @@ function renderPlaced() {
   state.placed.forEach(item => {
     const art = state.art.find(a => a.id === item.artId); if (!art) return;
     const frame = document.createElement('div'); frame.className = 'placed-frame'; frame.dataset.id = item.id; frame.tabIndex = 0;
-    const img = document.createElement('img'); img.src = art.url; img.alt = art.name; img.draggable = false; img.className = 'placed-frame-image'; img.style.transform = frameImageTransform(item);
+    const img = document.createElement('img'); img.src = art.url; img.alt = art.name; img.draggable = false; img.className = 'placed-frame-image'; img.style.cssText = frameImageStyleText(art);
     Object.assign(frame.style, { left: `${item.x}px`, top: `${item.y}px`, width: `${item.width}px`, height: `${item.height}px` });
     frame.append(img); frame.addEventListener('pointerdown', beginFrameDrag);
-    frame.addEventListener('click', () => { state.selectedId = item.id; }); frame.addEventListener('dblclick', () => openFrameEditor(item.id));
+    frame.addEventListener('click', () => { state.selectedId = item.id; });
     els.placedArt.append(frame);
   });
 }
 
-function frameImageTransform(item) {
-  return `translate(${item.cropX || 0}%, ${item.cropY || 0}%) rotate(${item.rotation || 0}deg) scale(${item.cropZoom || 1})`;
+function clamp(value, minimum, maximum) { return Math.max(minimum, Math.min(maximum, value)); }
+
+function ensureCrop(art) {
+  if (art.cropWidth !== undefined) return;
+  const zoom = art.cropZoom || 1, width = 1 / zoom, height = 1 / zoom;
+  art.cropWidth = width; art.cropHeight = height;
+  art.cropLeft = clamp((1 - width) / 2 - ((art.cropX || 0) / 100) * width, 0, 1 - width);
+  art.cropTop = clamp((1 - height) / 2 - ((art.cropY || 0) / 100) * height, 0, 1 - height);
 }
 
-let editingFrameId = null;
-function openFrameEditor(itemId) {
-  const item = state.placed.find(placed => placed.id === itemId), art = item && state.art.find(candidate => candidate.id === item.artId);
-  if (!item || !art) return;
-  editingFrameId = itemId; els.editorPreviewImage.src = art.url; els.editorPreview.style.aspectRatio = `${item.width} / ${item.height}`;
-  els.cropZoom.value = Math.round((item.cropZoom || 1) * 100); els.cropX.value = item.cropX || 0; els.cropY.value = item.cropY || 0; els.frameRotation.value = item.rotation || 0;
-  updateEditorPreview(); els.frameEditorDialog.showModal();
+function frameImageStyleText(art) {
+  ensureCrop(art);
+  return `left:${-art.cropLeft / art.cropWidth * 100}%;top:${-art.cropTop / art.cropHeight * 100}%;width:${100 / art.cropWidth}%;height:${100 / art.cropHeight}%;transform:rotate(${art.rotation || 0}deg)`;
 }
 
-function updateEditorPreview() {
-  const draft = { cropZoom: Number(els.cropZoom.value) / 100, cropX: Number(els.cropX.value), cropY: Number(els.cropY.value), rotation: Number(els.frameRotation.value) };
-  els.editorPreviewImage.style.transform = frameImageTransform(draft); els.cropZoomOutput.textContent = `${els.cropZoom.value}%`; els.rotationOutput.textContent = `${Number(els.frameRotation.value).toFixed(1)}°`;
+let editingArtId = null;
+let cropDraft = null;
+function openFrameEditor(artId) {
+  const art = state.art.find(candidate => candidate.id === artId); if (!art) return;
+  ensureCrop(art); editingArtId = artId;
+  cropDraft = { left: art.cropLeft, top: art.cropTop, width: art.cropWidth, height: art.cropHeight };
+  els.editorPreviewImage.onload = () => { els.cropCanvas.style.aspectRatio = `${els.editorPreviewImage.naturalWidth} / ${els.editorPreviewImage.naturalHeight}`; syncCropBox(); };
+  els.editorPreviewImage.src = art.url; els.frameRotation.value = art.rotation || 0; updateRotationOutput();
+  els.frameEditorDialog.showModal(); if (els.editorPreviewImage.complete) els.editorPreviewImage.onload();
 }
 
-[els.cropZoom, els.cropX, els.cropY, els.frameRotation].forEach(input => input.addEventListener('input', updateEditorPreview));
-els.editorReset.addEventListener('click', () => { els.cropZoom.value = 100; els.cropX.value = 0; els.cropY.value = 0; els.frameRotation.value = 0; updateEditorPreview(); });
+function syncCropBox() {
+  if (!cropDraft) return;
+  Object.assign(els.cropBox.style, { left: `${cropDraft.left * 100}%`, top: `${cropDraft.top * 100}%`, width: `${cropDraft.width * 100}%`, height: `${cropDraft.height * 100}%` });
+}
+
+function updateRotationOutput() { els.rotationOutput.textContent = `${Number(els.frameRotation.value).toFixed(1)}°`; }
+els.frameRotation.addEventListener('input', updateRotationOutput);
+
+let cropDrag = null;
+els.cropBox.addEventListener('pointerdown', event => {
+  event.preventDefault(); event.stopPropagation();
+  cropDrag = { mode: event.target.dataset.handle || 'move', x: event.clientX, y: event.clientY, start: { ...cropDraft } };
+  els.cropBox.setPointerCapture(event.pointerId);
+});
+els.cropBox.addEventListener('pointermove', event => {
+  if (!cropDrag) return;
+  const rect = els.cropCanvas.getBoundingClientRect(), dx = (event.clientX - cropDrag.x) / rect.width, dy = (event.clientY - cropDrag.y) / rect.height;
+  const start = cropDrag.start, min = .08;
+  if (cropDrag.mode === 'move') {
+    cropDraft.left = clamp(start.left + dx, 0, 1 - start.width); cropDraft.top = clamp(start.top + dy, 0, 1 - start.height);
+  } else {
+    const right = start.left + start.width, bottom = start.top + start.height;
+    if (cropDrag.mode.includes('w')) { cropDraft.left = clamp(start.left + dx, 0, right - min); cropDraft.width = right - cropDraft.left; }
+    if (cropDrag.mode.includes('e')) { cropDraft.width = clamp(start.width + dx, min, 1 - start.left); }
+    if (cropDrag.mode.includes('n')) { cropDraft.top = clamp(start.top + dy, 0, bottom - min); cropDraft.height = bottom - cropDraft.top; }
+    if (cropDrag.mode.includes('s')) { cropDraft.height = clamp(start.height + dy, min, 1 - start.top); }
+  }
+  syncCropBox();
+});
+function endCropDrag(event) { if (!cropDrag) return; if (els.cropBox.hasPointerCapture(event.pointerId)) els.cropBox.releasePointerCapture(event.pointerId); cropDrag = null; }
+els.cropBox.addEventListener('pointerup', endCropDrag); els.cropBox.addEventListener('pointercancel', endCropDrag);
+
+els.editorReset.addEventListener('click', () => { cropDraft = { left: 0, top: 0, width: 1, height: 1 }; els.frameRotation.value = 0; syncCropBox(); updateRotationOutput(); });
 els.editorClose.addEventListener('click', () => els.frameEditorDialog.close());
 els.frameEditorForm.addEventListener('submit', event => {
-  event.preventDefault(); const item = state.placed.find(placed => placed.id === editingFrameId); if (!item) return;
-  item.cropZoom = Number(els.cropZoom.value) / 100; item.cropX = Number(els.cropX.value); item.cropY = Number(els.cropY.value); item.rotation = Number(els.frameRotation.value);
-  els.frameEditorDialog.close(); renderPlaced(); queueSave();
+  event.preventDefault(); const art = state.art.find(candidate => candidate.id === editingArtId); if (!art) return;
+  art.cropLeft = cropDraft.left; art.cropTop = cropDraft.top; art.cropWidth = cropDraft.width; art.cropHeight = cropDraft.height; art.rotation = Number(els.frameRotation.value);
+  els.frameEditorDialog.close(); renderLibrary(); renderPlaced(); queueSave();
 });
 
 let drag = null;
@@ -322,8 +363,10 @@ function moveFrame(event) {
 }
 function endFrame(event) {
   event.currentTarget.removeEventListener('pointermove', moveFrame);
-  if (drag) { drag.item.x = drag.nextX ?? drag.originX; drag.item.y = drag.nextY ?? drag.originY; }
-  drag = null; renderPlaced(); queueSave();
+  const moved = drag && drag.nextX !== undefined && (drag.nextX !== drag.originX || drag.nextY !== drag.originY);
+  if (moved) { drag.item.x = drag.nextX; drag.item.y = drag.nextY; }
+  event.currentTarget.classList.remove('dragging'); drag = null;
+  if (moved) { renderPlaced(); queueSave(); }
 }
 
 document.addEventListener('keydown', event => {
@@ -346,9 +389,8 @@ els.exportButton.addEventListener('click', async () => {
     const art = state.art.find(a => a.id === item.artId), img = await imageFromUrl(art.url);
     const x = item.x * ratio, y = item.y * ratio, width = item.width * ratio, height = item.height * ratio;
     ctx.save(); ctx.beginPath(); ctx.rect(x, y, width, height); ctx.clip();
-    ctx.translate(x + width / 2 + (item.cropX || 0) * width / 100, y + height / 2 + (item.cropY || 0) * height / 100);
-    ctx.rotate((item.rotation || 0) * Math.PI / 180); ctx.scale(item.cropZoom || 1, item.cropZoom || 1);
-    ctx.drawImage(img, -width / 2, -height / 2, width, height); ctx.restore();
+    ensureCrop(art); ctx.translate(x + width / 2, y + height / 2); ctx.rotate((art.rotation || 0) * Math.PI / 180);
+    ctx.drawImage(img, art.cropLeft * img.naturalWidth, art.cropTop * img.naturalHeight, art.cropWidth * img.naturalWidth, art.cropHeight * img.naturalHeight, -width / 2, -height / 2, width, height); ctx.restore();
   }
   const link = document.createElement('a'); link.download = 'gallery-wall-plan.png'; link.href = canvas.toDataURL('image/png'); link.click();
 });
