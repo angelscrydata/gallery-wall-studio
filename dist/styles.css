@@ -72,6 +72,9 @@ input[type="number"], select { width: 100%; border: 1px solid var(--line); backg
 .list-view .project-open { display: grid; grid-template-columns: 74px minmax(0, 1fr); grid-column: 1 / -1; }
 .list-view .project-thumb { width: 74px; height: 62px; aspect-ratio: auto; }
 .list-view .project-rename, .list-view .project-rename-form { grid-column: 1 / -1; }
+.studio-footer { margin-top: 36px; padding: 18px 0 0; border-top: 1px solid var(--line); color: var(--muted); font: .68rem/1.6 "Courier New", Courier, monospace; }
+.studio-footer span { display: block; }
+.studio-footer a { color: var(--ink); text-underline-offset: 3px; }
 .pending-card { border: 1px solid var(--line); padding: 12px; margin-top: 12px; }
 .pending-preview { width: 100%; height: 116px; object-fit: contain; background-image: linear-gradient(45deg,#eee 25%,transparent 25%),linear-gradient(-45deg,#eee 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#eee 75%),linear-gradient(-45deg,transparent 75%,#eee 75%); background-size: 16px 16px; background-position: 0 0,0 8px,8px -8px,-8px 0; }
 .pending-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 8px 0; font-size: .78rem; }
@@ -106,7 +109,8 @@ input[type="number"], select { width: 100%; border: 1px solid var(--line); backg
 #measurementLine { stroke: #fff; stroke-width: 3; filter: drop-shadow(0 1px 2px #000); }
 #measureStart, #measureEnd { fill: var(--ink); stroke: white; stroke-width: 2; }
 .placed-art { z-index: 3; pointer-events: none; }
-.placed-frame { position: absolute; cursor: grab; pointer-events: auto; border: 0; outline: 0; filter: drop-shadow(0 5px 5px rgba(0,0,0,.18)); touch-action: none; -webkit-user-drag: none; }
+.placed-frame { position: absolute; cursor: grab; pointer-events: auto; overflow: hidden; border: 0; outline: 0; filter: drop-shadow(0 5px 5px rgba(0,0,0,.18)); touch-action: none; -webkit-user-drag: none; }
+.placed-frame-image { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border: 0; outline: 0; pointer-events: none; transform-origin: center; }
 .placed-frame.dragging { cursor: grabbing; will-change: transform; backface-visibility: hidden; }
 .keyboard-note { padding-top: 10px; text-align: right; }
 dialog { border: 1px solid var(--ink); background: var(--panel); padding: 0; width: min(420px, calc(100% - 32px)); }
@@ -115,6 +119,15 @@ dialog form { padding: 30px; }
 dialog h2 { font-size: 2rem; }
 dialog form > p:not(.eyebrow) { color: var(--muted); line-height: 1.5; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+.frame-editor-dialog { width: min(540px, calc(100% - 32px)); }
+.editor-heading { display: flex; justify-content: space-between; align-items: flex-start; }
+.editor-close { width: 36px; height: 36px; border: 0; background: transparent; font-size: 1.6rem; cursor: pointer; }
+.editor-preview { position: relative; width: min(280px, 100%); aspect-ratio: 4 / 3; margin: 22px auto; overflow: hidden; background-color: #ece8df; background-image: linear-gradient(45deg,#ddd7cc 25%,transparent 25%),linear-gradient(-45deg,#ddd7cc 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ddd7cc 75%),linear-gradient(-45deg,transparent 75%,#ddd7cc 75%); background-size: 18px 18px; background-position: 0 0,0 9px,9px -9px,-9px 0; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.editor-preview img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; transform-origin: center; }
+.editor-controls { display: grid; gap: 16px; }
+.editor-controls label { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
+.editor-controls output { float: right; color: var(--ink); }
+.editor-controls input[type="range"] { width: 100%; margin-top: 8px; accent-color: var(--ink); }
 @media (max-width: 800px) {
   html, body { height: auto; }
   body { overflow: auto; }
