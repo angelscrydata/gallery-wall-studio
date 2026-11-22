@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f5f2eb" />
+  <title>Gallery Wall Studio</title>
+  <meta name="description" content="Plan a gallery wall to scale from a photo of your space." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#">Gallery Wall Studio</a>
+    <div class="header-actions">
+      <button class="text-button" id="resetButton" type="button">Start over</button>
+      <button class="button button-dark" id="exportButton" type="button" disabled>Save image</button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="sidebar" aria-label="Gallery wall controls">
+      <div class="intro">
+        <p class="eyebrow">Plan to scale</p>
+        <h1>Compose your wall,<br />before the first nail.</h1>
+      </div>
+
+      <section class="step" id="wallStep">
+        <div class="step-heading"><span>01</span><h2>Your wall</h2></div>
+        <p>Choose a straight-on photo that includes an object of known length.</p>
+        <label class="upload-control">
+          <input id="wallInput" type="file" accept="image/*" />
+          <span id="wallInputLabel">Choose wall photo</span>
+        </label>
+      </section>
+
+      <section class="step is-disabled" id="calibrationStep">
+        <div class="step-heading"><span>02</span><h2>Set the scale</h2></div>
+        <p>Draw a line across the known object, then enter its actual length.</p>
+        <button class="button button-outline full" id="drawScaleButton" type="button" disabled>Draw measurement line</button>
+        <div class="measurement-fields">
+          <label>Known length<input id="knownLength" type="number" min="0.1" step="0.1" placeholder="30" disabled /></label>
+          <label>Unit<select id="unitSelect" disabled><option value="cm">cm</option><option value="in">in</option></select></label>
+        </div>
+        <button class="button button-dark full" id="applyScaleButton" type="button" disabled>Apply scale</button>
+        <p class="status" id="scaleStatus" aria-live="polite"></p>
+      </section>
+
+      <section class="step is-disabled" id="artStep">
+        <div class="step-heading"><span>03</span><h2>Add framed art</h2></div>
+        <p>Use transparent PNGs photographed straight-on. Enter each frame’s outside dimensions.</p>
+        <label class="upload-control">
+          <input id="artInput" type="file" accept="image/png,image/webp" multiple disabled />
+          <span>Add frame images</span>
+        </label>
+        <div id="pendingArt" class="pending-art"></div>
+        <div class="art-library-heading">
+          <span>Frames</span><span id="frameCount">0</span>
+        </div>
+        <div id="artLibrary" class="art-library">
+          <div class="empty-library">Your scaled frames will appear here.</div>
+        </div>
+      </section>
+    </aside>
+
+    <section class="workspace" aria-label="Wall planning canvas">
+      <div class="workspace-tools">
+        <p id="canvasHint">Begin by choosing a wall photo</p>
+        <div class="zoom-controls" aria-label="Zoom controls">
+          <button id="zoomOut" type="button" aria-label="Zoom out" disabled>−</button>
+          <span id="zoomLabel">100%</span>
+          <button id="zoomIn" type="button" aria-label="Zoom in" disabled>+</button>
+        </div>
+      </div>
+      <div class="stage-wrap" id="stageWrap">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p>Your wall is the canvas.</p>
+          <label class="button button-outline">
+            <input type="file" accept="image/*" id="wallInputEmpty" />
+            Choose a photo
+          </label>
+        </div>
+        <div class="stage" id="stage" hidden>
+          <img id="wallImage" alt="Uploaded wall" draggable="false" />
+          <svg id="measurementLayer" aria-hidden="true"><line id="measurementLine" /><circle id="measureStart" r="5" /><circle id="measureEnd" r="5" /></svg>
+          <div id="placedArt" class="placed-art"></div>
+        </div>
+      </div>
+      <p class="keyboard-note">Select a frame to move it with arrow keys. Press Delete to remove it.</p>
+    </section>
+  </main>
+
+  <dialog id="confirmDialog">
+    <form method="dialog">
+      <p class="eyebrow">Clear this composition?</p>
+      <h2>Start over</h2>
+      <p>This removes the wall photo, calibration, and all uploaded frames.</p>
+      <div class="dialog-actions"><button class="button button-outline" value="cancel">Cancel</button><button class="button button-dark" value="confirm">Clear all</button></div>
+    </form>
+  </dialog>
+  <script src="app.js"></script>
+</body>
+</html>
