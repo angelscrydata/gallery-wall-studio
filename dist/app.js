@@ -320,7 +320,7 @@ async function createPendingArt(file) {
   card.querySelector('.add-art').onclick = () => {
     const width = Number(card.querySelector('.art-width').value), height = Number(card.querySelector('.art-height').value);
     if (!(width > 0 && height > 0)) { card.querySelector('.art-width').focus(); return; }
-    state.art.push({ id, url, name: file.name, width, height, unit: state.unit, cropLeft: 0, cropTop: 0, cropWidth: 1, cropHeight: 1, rotation: 0 }); card.remove(); renderLibrary(); queueSave();
+    state.art.push({ id, url, sourceUrl: url, cropCorners: fullCropCorners(), name: file.name, width, height, unit: state.unit, cropLeft: 0, cropTop: 0, cropWidth: 1, cropHeight: 1, rotation: 0 }); card.remove(); renderLibrary(); queueSave();
   };
   els.pendingArt.append(card);
 }
@@ -479,13 +479,13 @@ function fullCropCorners() { return [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 
 function openFrameEditor(artId) {
   const art = state.art.find(candidate => candidate.id === artId); if (!art) return;
   ensureCrop(art); editingArtId = artId;
-  cropDraft = [
+  cropDraft = art.cropCorners?.length === 4 ? art.cropCorners.map(point => ({ ...point })) : [
     { x: art.cropLeft, y: art.cropTop },
     { x: art.cropLeft + art.cropWidth, y: art.cropTop },
     { x: art.cropLeft + art.cropWidth, y: art.cropTop + art.cropHeight },
     { x: art.cropLeft, y: art.cropTop + art.cropHeight }
   ];
-  editorDraftUrl = art.url; editorDraftWidth = art.width; editorDraftHeight = art.height;
+  editorDraftUrl = art.sourceUrl || art.url; editorDraftWidth = art.width; editorDraftHeight = art.height;
   els.editorPreviewImage.onload = () => { els.cropCanvas.style.aspectRatio = `${els.editorPreviewImage.naturalWidth} / ${els.editorPreviewImage.naturalHeight}`; syncCropPolygon(); };
   els.editorPreviewImage.src = editorDraftUrl; els.frameRotation.value = art.rotation || 0; updateRotationOutput();
   els.frameEditorDialog.showModal(); if (els.editorPreviewImage.complete) els.editorPreviewImage.onload();
@@ -515,12 +515,8 @@ els.cropCorners.forEach(handle => handle.addEventListener('pointerdown', event =
 document.addEventListener('pointermove', event => {
   if (!cropDrag) return;
   const rect = els.cropCanvas.getBoundingClientRect(), point = { x: clamp((event.clientX - rect.left) / rect.width, 0, 1), y: clamp((event.clientY - rect.top) / rect.height, 0, 1) };
-  const index = cropDrag.index, minimumGap = .02;
-  if (index === 0) { point.x = Math.min(point.x, cropDraft[1].x - minimumGap); point.y = Math.min(point.y, cropDraft[3].y - minimumGap); }
-  if (index === 1) { point.x = Math.max(point.x, cropDraft[0].x + minimumGap); point.y = Math.min(point.y, cropDraft[2].y - minimumGap); }
-  if (index === 2) { point.x = Math.max(point.x, cropDraft[3].x + minimumGap); point.y = Math.max(point.y, cropDraft[1].y + minimumGap); }
-  if (index === 3) { point.x = Math.min(point.x, cropDraft[2].x - minimumGap); point.y = Math.max(point.y, cropDraft[0].y + minimumGap); }
-  cropDraft[index] = point; syncCropPolygon();
+  const nextCrop = cropDraft.map(candidate => ({ ...candidate })); nextCrop[cropDrag.index] = point;
+  if (isValidCropPolygon(nextCrop)) { cropDraft = nextCrop; syncCropPolygon(); }
 });
 function endCropDrag(event) { if (!cropDrag) return; if (cropDrag.handle.hasPointerCapture(event.pointerId)) cropDrag.handle.releasePointerCapture(event.pointerId); cropDrag = null; }
 document.addEventListener('pointerup', endCropDrag); document.addEventListener('pointercancel', endCropDrag);
@@ -556,6 +552,7 @@ els.frameEditorForm.addEventListener('submit', async event => {
   const dimensionsSwapped = nearlyEqual(editorDraftWidth, oldHeight) && nearlyEqual(editorDraftHeight, oldWidth) && !nearlyEqual(oldWidth, oldHeight);
   try {
     art.url = await rectifyDataUrl(editorDraftUrl, cropDraft); art.width = editorDraftWidth; art.height = editorDraftHeight;
+    art.sourceUrl = editorDraftUrl; art.cropCorners = cropDraft.map(point => ({ ...point }));
     art.cropLeft = 0; art.cropTop = 0; art.cropWidth = 1; art.cropHeight = 1; art.rotation = Number(els.frameRotation.value);
     if (dimensionsSwapped) rotatePlacedCopies(art.id);
     else if (!nearlyEqual(oldWidth, art.width) || !nearlyEqual(oldHeight, art.height)) resizePlacedCopies(art);
@@ -563,6 +560,20 @@ els.frameEditorForm.addEventListener('submit', async event => {
   } catch (error) { window.alert(`Could not straighten this frame. ${error.message}`); }
   finally { submitButton.disabled = false; submitButton.textContent = 'Apply'; }
 });
+
+function isValidCropPolygon(points) {
+  let direction = 0, area = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index], next = points[(index + 1) % points.length], after = points[(index + 2) % points.length];
+    area += current.x * next.y - next.x * current.y;
+    const cross = (next.x - current.x) * (after.y - next.y) - (next.y - current.y) * (after.x - next.x);
+    if (Math.abs(cross) < .0005) return false;
+    const crossDirection = Math.sign(cross);
+    if (direction && direction !== crossDirection) return false;
+    direction = crossDirection;
+  }
+  return Math.abs(area) > .01;
+}
 
 async function rectifyDataUrl(url, corners) {
   const image = await imageFromUrl(url), sourceCanvas = document.createElement('canvas');
