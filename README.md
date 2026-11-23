@@ -2,6 +2,19 @@
 
 A browser-based tool for planning a gallery wall to scale. Calibrate a photograph of a room using an object of known length, add framed artwork with its real dimensions, and arrange the frames directly on the wall image.
 
+![Gallery Wall Studio showing a scaled gallery wall plan](docs/gallery-wall-studio.png)
+
+## Features
+
+- Calibrate wall photos in centimetres or inches using a visible object of known length.
+- Import PNG, WebP, JPEG, HEIC, and HEIF frame photos with real outside dimensions.
+- Correct frame perspective with four independently movable scanner-style corners, fine straightening, and 90° rotation.
+- Reopen and expand non-destructive crops or reset a frame to its original upload.
+- Arrange accurately scaled frames with dragging, keyboard nudging, zooming, and canvas panning.
+- Show readable distances between neighboring frames.
+- Automatically save, rename, reopen, and delete local wall projects.
+- Export the finished composition as a PNG.
+
 ## Requirements
 
 - A recent version of Node.js
@@ -11,7 +24,7 @@ A browser-based tool for planning a gallery wall to scale. Calibrate a photograp
 
 ## Run locally
 
-From the repository root, install the HEIC converter and start the local server:
+From the repository root, install dependencies and start the local server:
 
 ```bash
 npm install
@@ -33,7 +46,8 @@ PORT=3000 npm run dev
 3. **Add framed artwork.** Upload PNG, WebP, JPEG, HEIC, or HEIF images and enter each frame's outside width and height using the selected unit.
 4. **Prepare a frame.** Double-click a frame in the right rail to move its four crop corners independently, straighten the selected area into a rectangle, fine-tune its angle, or rotate it 90°. Cropping is non-destructive, so reopening the editor lets you expand the crop again or reset to the original upload. The rail previews preserve the frames' relative physical sizes.
 5. **Arrange the wall.** Drag frames from the right rail onto the wall. Drag a placed frame to move it, use the arrow keys for precise positioning, or press Delete to remove it. Use **Show distances** to label gaps between directly neighboring frames. Zoom from 50% to 500%; at higher zoom, drag the wall to pan while measurement text stays the same on-screen size.
-6. **Export the layout.** Select **Save image** to download the completed wall plan as a PNG.
+6. **Start another wall.** Select **New wall**. The current project is saved before a blank workspace opens.
+7. **Export the layout.** Select **Save image** to download the completed wall plan as a PNG.
 
 ## Saved walls
 
@@ -54,6 +68,8 @@ dist/
   app.js        Calibration, editing, persistence, and export logic
 scripts/
   dev.mjs       Local development server and project storage API
+docs/
+  gallery-wall-studio.png  README screenshot
 package.json    npm scripts
 .gallery-wall-data/  Local saved walls (created automatically, gitignored)
 ```
