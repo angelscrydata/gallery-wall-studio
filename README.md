@@ -31,7 +31,7 @@ PORT=3000 npm run dev
 1. **Upload a wall photo.** Include a ruler, measuring tape, or another object whose real length you know.
 2. **Calibrate the scale.** Draw a line over the known object, enter its length, select centimetres or inches, and apply the scale. Reapplying the scale updates every placed frame together.
 3. **Add framed artwork.** Upload PNG, WebP, JPEG, HEIC, or HEIF images and enter each frame's outside width and height using the selected unit.
-4. **Prepare a frame.** Double-click a frame in the right rail to move its four crop corners independently, straighten the selected area into a rectangle, fine-tune its angle, or rotate it 90°. Cropping is non-destructive, so reopening the editor lets you expand the crop again. The rail previews preserve the frames' relative physical sizes.
+4. **Prepare a frame.** Double-click a frame in the right rail to move its four crop corners independently, straighten the selected area into a rectangle, fine-tune its angle, or rotate it 90°. Cropping is non-destructive, so reopening the editor lets you expand the crop again or reset to the original upload. The rail previews preserve the frames' relative physical sizes.
 5. **Arrange the wall.** Drag frames from the right rail onto the wall. Drag a placed frame to move it, use the arrow keys for precise positioning, or press Delete to remove it. Use **Show distances** to label gaps between directly neighboring frames. Zoom from 50% to 500%; at higher zoom, drag the wall to pan while measurement text stays the same on-screen size.
 6. **Export the layout.** Select **Save image** to download the completed wall plan as a PNG.
 

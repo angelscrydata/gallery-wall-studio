@@ -320,7 +320,7 @@ async function createPendingArt(file) {
   card.querySelector('.add-art').onclick = () => {
     const width = Number(card.querySelector('.art-width').value), height = Number(card.querySelector('.art-height').value);
     if (!(width > 0 && height > 0)) { card.querySelector('.art-width').focus(); return; }
-    state.art.push({ id, url, sourceUrl: url, cropCorners: fullCropCorners(), name: file.name, width, height, unit: state.unit, cropLeft: 0, cropTop: 0, cropWidth: 1, cropHeight: 1, rotation: 0 }); card.remove(); renderLibrary(); queueSave();
+    state.art.push({ id, url, sourceUrl: url, originalUrl: url, originalWidth: width, originalHeight: height, cropCorners: fullCropCorners(), name: file.name, width, height, unit: state.unit, cropLeft: 0, cropTop: 0, cropWidth: 1, cropHeight: 1, rotation: 0 }); card.remove(); renderLibrary(); queueSave();
   };
   els.pendingArt.append(card);
 }
@@ -478,6 +478,8 @@ let editorDraftHeight = null;
 function fullCropCorners() { return [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }]; }
 function openFrameEditor(artId) {
   const art = state.art.find(candidate => candidate.id === artId); if (!art) return;
+  art.originalUrl ||= art.sourceUrl || art.url;
+  art.originalWidth ??= art.width; art.originalHeight ??= art.height;
   ensureCrop(art); editingArtId = artId;
   cropDraft = art.cropCorners?.length === 4 ? art.cropCorners.map(point => ({ ...point })) : [
     { x: art.cropLeft, y: art.cropTop },
@@ -509,12 +511,21 @@ els.frameRotation.addEventListener('input', updateRotationOutput);
 
 let cropDrag = null;
 els.cropCorners.forEach(handle => handle.addEventListener('pointerdown', event => {
-  event.preventDefault(); event.stopPropagation(); cropDrag = { index: Number(handle.dataset.corner), handle };
+  event.preventDefault(); event.stopPropagation();
+  const handleRect = handle.getBoundingClientRect();
+  cropDrag = {
+    index: Number(handle.dataset.corner), handle,
+    offsetX: event.clientX - (handleRect.left + handleRect.width / 2),
+    offsetY: event.clientY - (handleRect.top + handleRect.height / 2)
+  };
   handle.setPointerCapture(event.pointerId);
 }));
 document.addEventListener('pointermove', event => {
   if (!cropDrag) return;
-  const rect = els.cropCanvas.getBoundingClientRect(), point = { x: clamp((event.clientX - rect.left) / rect.width, 0, 1), y: clamp((event.clientY - rect.top) / rect.height, 0, 1) };
+  const rect = els.cropCanvas.getBoundingClientRect(), point = {
+    x: clamp((event.clientX - cropDrag.offsetX - rect.left) / rect.width, 0, 1),
+    y: clamp((event.clientY - cropDrag.offsetY - rect.top) / rect.height, 0, 1)
+  };
   const nextCrop = cropDraft.map(candidate => ({ ...candidate })); nextCrop[cropDrag.index] = point;
   if (isValidCropPolygon(nextCrop)) { cropDraft = nextCrop; syncCropPolygon(); }
 });
@@ -542,7 +553,11 @@ function rotateDataUrl90(url) {
 }
 
 els.editorReset.addEventListener('click', () => {
-  cropDraft = fullCropCorners(); els.frameRotation.value = 0; syncCropPolygon(); updateRotationOutput();
+  const art = state.art.find(candidate => candidate.id === editingArtId); if (!art) return;
+  editorDraftUrl = art.originalUrl || art.sourceUrl || art.url;
+  editorDraftWidth = art.originalWidth ?? art.width; editorDraftHeight = art.originalHeight ?? art.height;
+  cropDraft = fullCropCorners(); els.frameRotation.value = 0;
+  els.editorPreviewImage.src = editorDraftUrl; syncCropPolygon(); updateRotationOutput();
 });
 els.editorClose.addEventListener('click', () => els.frameEditorDialog.close());
 els.frameEditorForm.addEventListener('submit', async event => {
