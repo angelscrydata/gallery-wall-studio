@@ -12,7 +12,7 @@
   <header class="topbar">
     <a class="brand" href="#">Gallery Wall Studio</a>
     <div class="header-actions">
-      <button class="text-button" id="resetButton" type="button">Start over</button>
+      <button class="text-button" id="resetButton" type="button">New wall</button>
       <button class="button button-dark" id="exportButton" type="button" disabled>Save image</button>
     </div>
   </header>
@@ -35,7 +35,7 @@
         <div class="step-heading"><span>01</span><h2>Your wall</h2></div>
         <p>Choose a straight-on photo that includes an object of known length.</p>
         <label class="upload-control">
-          <input id="wallInput" type="file" accept="image/*" />
+          <input id="wallInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif" />
           <span id="wallInputLabel">Choose wall photo</span>
         </label>
       </section>
@@ -54,10 +54,10 @@
 
       <section class="step is-disabled" id="artStep">
         <div class="step-heading"><span>03</span><h2>Add framed art</h2></div>
-        <p>Use transparent PNGs photographed straight-on. Enter each frame’s outside dimensions.</p>
+        <p>Upload a frame image, then enter its outside dimensions. You can correct its perspective after adding it.</p>
         <p class="unit-note">Frame dimensions are in <strong id="artUnitLabel">cm</strong>.</p>
         <label class="upload-control">
-          <input id="artInput" type="file" accept="image/png,image/webp" multiple disabled />
+          <input id="artInput" type="file" accept="image/png,image/webp,image/jpeg,.jpg,.jpeg,.heic,.heif,image/heic,image/heif" multiple disabled />
           <span>Add frame images</span>
         </label>
         <div id="pendingArt" class="pending-art"></div>
@@ -66,7 +66,7 @@
 
       <div class="sidebar-panel" id="historyPanel" role="tabpanel" aria-labelledby="historyTab" hidden>
         <div class="history-heading">
-          <div><p class="eyebrow">Saved on this device</p><h2>Previous walls</h2></div>
+          <div><p class="eyebrow">Saved in this repo</p><h2>Previous walls</h2></div>
           <div class="view-toggle" aria-label="Library view">
             <button class="is-active" id="gridViewButton" type="button" aria-label="Grid view">▦</button>
             <button id="listViewButton" type="button" aria-label="List view">☰</button>
@@ -83,16 +83,19 @@
     <section class="workspace" aria-label="Wall planning canvas">
       <div class="workspace-tools">
         <p id="canvasHint">Begin by choosing a wall photo</p>
-        <div class="zoom-controls" aria-label="Zoom controls">
-          <button id="zoomOut" type="button" aria-label="Zoom out" disabled>−</button>
-          <span id="zoomLabel">100%</span>
-          <button id="zoomIn" type="button" aria-label="Zoom in" disabled>+</button>
+        <div class="workspace-actions">
+          <button class="spacing-toggle" id="spacingToggle" type="button" aria-pressed="false" disabled>Show distances</button>
+          <div class="zoom-controls" aria-label="Zoom controls">
+            <button id="zoomOut" type="button" aria-label="Zoom out" disabled>−</button>
+            <span id="zoomLabel">100%</span>
+            <button id="zoomIn" type="button" aria-label="Zoom in" disabled>+</button>
+          </div>
         </div>
       </div>
       <div class="stage-wrap" id="stageWrap">
         <div class="empty-state" id="emptyState">
           <label class="button button-outline">
-            <input type="file" accept="image/*" id="wallInputEmpty" />
+            <input type="file" accept="image/*,.heic,.heif,image/heic,image/heif" id="wallInputEmpty" />
             Choose a photo
           </label>
         </div>
@@ -100,9 +103,10 @@
           <img id="wallImage" alt="Uploaded wall" draggable="false" />
           <svg id="measurementLayer" aria-hidden="true"><line id="measurementLine" /><circle id="measureStart" r="5" /><circle id="measureEnd" r="5" /></svg>
           <div id="placedArt" class="placed-art"></div>
+          <svg id="spacingLayer" class="spacing-layer" aria-hidden="true"></svg>
         </div>
       </div>
-      <p class="keyboard-note">Select a frame to move it with arrow keys. Press Delete to remove it.</p>
+      <p class="keyboard-note">Drag the wall to pan when zoomed. Select a frame to move it with arrow keys; press Delete to remove it.</p>
     </section>
 
     <aside class="frame-sidebar" aria-label="Scaled frame library">
@@ -110,7 +114,7 @@
         <div><p class="eyebrow">Your collection</p><h2>Frames</h2></div>
         <span id="frameCount">0</span>
       </div>
-      <p class="frame-help">Drag a frame onto the wall to place it. Double-click a frame here to crop and straighten it.</p>
+      <p class="frame-help">Drag a frame onto the wall to place it. Double-click it here to crop, straighten, or rotate it.</p>
       <div id="artLibrary" class="art-library">
         <div class="empty-library">Your scaled frames will appear here.</div>
       </div>
@@ -119,27 +123,33 @@
 
   <dialog id="confirmDialog">
     <form method="dialog">
-      <p class="eyebrow">Clear this composition?</p>
-      <h2>Start over</h2>
-      <p>This removes the wall photo, calibration, and all uploaded frames.</p>
-      <div class="dialog-actions"><button class="button button-outline" value="cancel">Cancel</button><button class="button button-dark" value="confirm">Clear all</button></div>
+      <p class="eyebrow">Begin another composition?</p>
+      <h2>New wall</h2>
+      <p>Your current wall will be saved before a new blank wall opens.</p>
+      <div class="dialog-actions"><button class="button button-outline" value="cancel">Cancel</button><button class="button button-dark" value="confirm">Create new wall</button></div>
     </form>
   </dialog>
   <dialog id="frameEditorDialog" class="frame-editor-dialog">
     <form id="frameEditorForm">
-      <div class="editor-heading"><div><p class="eyebrow">Fine tune</p><h2>Crop &amp; straighten</h2></div><button class="editor-close" id="editorClose" type="button" aria-label="Close">×</button></div>
-      <p>Adjust the artwork before placing it. The outside dimensions stay exactly the same.</p>
+      <div class="editor-heading"><div><p class="eyebrow">Fine tune</p><h2>Scan, crop &amp; straighten</h2></div><button class="editor-close" id="editorClose" type="button" aria-label="Close">×</button></div>
+      <p>Place each corner on the outside edge of the frame. The selected shape will be straightened into a rectangle.</p>
       <div class="crop-canvas" id="cropCanvas">
         <img id="editorPreviewImage" alt="Frame crop preview" draggable="false" />
-        <div class="crop-box" id="cropBox"><i data-handle="nw"></i><i data-handle="ne"></i><i data-handle="se"></i><i data-handle="sw"></i></div>
+        <svg class="crop-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon id="cropPolygon" points="0,0 100,0 100,100 0,100"></polygon></svg>
+        <button class="crop-corner" data-corner="0" type="button" aria-label="Move top-left corner"></button>
+        <button class="crop-corner" data-corner="1" type="button" aria-label="Move top-right corner"></button>
+        <button class="crop-corner" data-corner="2" type="button" aria-label="Move bottom-right corner"></button>
+        <button class="crop-corner" data-corner="3" type="button" aria-label="Move bottom-left corner"></button>
       </div>
-      <p class="crop-help">Drag the crop box to move it. Drag any corner to resize it freely.</p>
+      <p class="crop-help">Drag each corner independently, like a document scanner. Apply stretches the selected polygon to the frame dimensions.</p>
       <div class="editor-controls">
         <label>Straighten <output id="rotationOutput">0°</output><input id="frameRotation" type="range" min="-6" max="6" step="0.1" value="0" /></label>
+        <button class="button button-outline" id="rotateFrameButton" type="button">Rotate frame 90°</button>
       </div>
       <div class="dialog-actions"><button class="button button-outline" id="editorReset" type="button">Reset</button><button class="button button-dark" type="submit">Apply</button></div>
     </form>
   </dialog>
+  <script src="/vendor/heic2any.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
