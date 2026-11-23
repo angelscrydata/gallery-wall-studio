@@ -83,19 +83,13 @@ async function getAllProjects() {
   catch (error) { console.warn('Repo-backed storage is unavailable; using browser projects.', error); return localProjects; }
 
   const projects = new Map(serverProjects.map(project => [project.id, project]));
-  const migrationKey = 'gallery-wall-repo-migrated-v2';
-  const shouldMigrateBrowserProjects = localStorage.getItem(migrationKey) !== 'true';
-  if (shouldMigrateBrowserProjects) {
-    let migrationSucceeded = true;
-    for (const localProject of localProjects) {
-      const serverProject = projects.get(localProject.id);
-      if (!serverProject || (localProject.updatedAt || 0) > (serverProject.updatedAt || 0)) {
-        projects.set(localProject.id, localProject);
-        try { await putServerProject(localProject); }
-        catch (error) { migrationSucceeded = false; console.warn('Could not migrate a browser project.', error); }
-      }
+  for (const localProject of localProjects) {
+    const serverProject = projects.get(localProject.id);
+    if (!serverProject || (localProject.updatedAt || 0) > (serverProject.updatedAt || 0)) {
+      projects.set(localProject.id, localProject);
+      try { await putServerProject(localProject); }
+      catch (error) { console.warn('Could not sync a browser project to shared storage.', error); }
     }
-    if (migrationSucceeded) localStorage.setItem(migrationKey, 'true');
   }
   for (const project of projects.values()) {
     const localProject = localProjects.find(candidate => candidate.id === project.id);
@@ -765,5 +759,6 @@ function setProjectView(view) {
   localStorage.setItem('gallery-wall-project-view', view);
 }
 setProjectView(localStorage.getItem('gallery-wall-project-view') === 'list' ? 'list' : 'grid');
+getAllProjects().catch(error => console.warn('Could not sync saved walls on startup.', error));
 window.addEventListener('resize', () => { if (state.wallUrl && !state.placed.length) fitStage(); });
 function escapeHtml(value) { const div = document.createElement('div'); div.textContent = value; return div.innerHTML; }
