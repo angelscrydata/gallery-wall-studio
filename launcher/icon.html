@@ -1,0 +1,111 @@
+<!doctype html>
+<!-- The app icon. launcher/render-icon.mjs renders this to a 1024×1024 PNG with headless Chrome
+     (transparent corners), then turns it into launcher/GalleryWallStudio.icns. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 1024px; height: 1024px; background: transparent; overflow: hidden; }
+  /* macOS icon grid: an 824px rounded tile centred in the 1024 canvas */
+  .tile {
+    position: absolute; left: 100px; top: 100px; width: 824px; height: 824px; border-radius: 185px; overflow: hidden;
+    background-color: #f2ede3;
+    background-image:
+      radial-gradient(circle at 50% 38%, rgba(255,253,247,.95) 0, rgba(255,253,247,0) 62%),
+      radial-gradient(#d6cfc2 2.6px, transparent 3.4px);
+    background-size: auto, 40px 40px;
+    background-position: 0 0, 20px 20px;
+    box-shadow: inset 0 0 0 8px rgba(255,255,255,.6), inset 0 -30px 70px rgba(120,100,70,.16);
+  }
+  /* each frame: moulding colour as border, a mat, then the art */
+  .frame { position: absolute; box-sizing: border-box; box-shadow: 0 16px 26px rgba(40,32,20,.28), 0 3px 6px rgba(40,32,20,.22); }
+  .mat { position: absolute; background: #fbf8f1; }
+  .art { position: absolute; inset: 0; overflow: hidden; }
+
+  /* centre: the pears canvas (no mat, gallery-wrapped) */
+  .pears { left: 286px; top: 210px; width: 252px; height: 292px; background: #2a1d17; }
+  .pears .art { inset: 0;
+    background:
+      radial-gradient(circle 9px at 112px 128px, rgba(255,250,200,.85) 0 90%, transparent 100%),
+      radial-gradient(circle 36px at 126px 176px, #e2d443 0 96%, transparent 100%),
+      radial-gradient(circle 22px at 128px 138px, #e2d443 0 95%, transparent 100%),
+      linear-gradient(#6b4a22, #6b4a22) 129px 104px / 5px 18px no-repeat,
+      radial-gradient(circle 38px at 84px 152px, #d3c83a 0 96%, transparent 100%),
+      radial-gradient(circle 23px at 96px 110px, #d3c83a 0 95%, transparent 100%),
+      linear-gradient(#6b4a22, #6b4a22) 98px 76px / 5px 18px no-repeat,
+      radial-gradient(circle 37px at 170px 150px, #c9bf35 0 96%, transparent 100%),
+      radial-gradient(circle 23px at 160px 108px, #c9bf35 0 95%, transparent 100%),
+      linear-gradient(#6b4a22, #6b4a22) 157px 74px / 5px 18px no-repeat,
+      radial-gradient(ellipse 104px 44px at 128px 206px, #d2a08c 0 96%, transparent 100%),
+      radial-gradient(ellipse 30px 12px at 128px 258px, #b88471 0 94%, transparent 100%),
+      linear-gradient(#a8705f, #a8705f) 114px 236px / 28px 24px no-repeat,
+      linear-gradient(#3b2a22, #23170f 72%, #4e2615);
+  }
+
+  /* left top: sage botanical, dark wood frame, white mat */
+  .botanical { left: 110px; top: 180px; width: 156px; height: 212px; border: 15px solid #2b2826; }
+  .botanical .mat { inset: 0; }
+  .botanical .art { inset: 0;
+    background:
+      radial-gradient(ellipse 14px 9px at 40% 30%, #9db39a 0 70%, transparent 74%),
+      radial-gradient(ellipse 14px 9px at 60% 42%, #8ea78b 0 70%, transparent 74%),
+      radial-gradient(ellipse 14px 9px at 38% 54%, #a8bca5 0 70%, transparent 74%),
+      radial-gradient(ellipse 14px 9px at 62% 66%, #93ab90 0 70%, transparent 74%),
+      radial-gradient(ellipse 13px 8px at 44% 78%, #a3b8a0 0 70%, transparent 74%),
+      linear-gradient(90deg, transparent 49%, #8aa087 49% 51.5%, transparent 51.5%) center 22% / 100% 66% no-repeat,
+      #f6f3ec;
+  }
+
+  /* left bottom: black-and-white print, black frame, cream mat */
+  .print { left: 110px; top: 414px; width: 156px; height: 128px; border: 13px solid #151413; }
+  .print .mat { inset: 0; }
+  .print .art { left: 14px; right: 14px; top: 12px; bottom: 16px;
+    background:
+      radial-gradient(ellipse 22px 15px at 50% 72%, #8b8984 0 70%, transparent 74%),
+      linear-gradient(#5d5b57 0 48%, #a5a39e 48% 60%, #d7d5d0 60%);
+  }
+
+  /* right top: forest photo, thin gold frame, white mat */
+  .forest { left: 558px; top: 180px; width: 156px; height: 136px; border: 10px solid #b6914d;
+    box-shadow: inset 0 0 0 2px #e2c784, 0 16px 26px rgba(40,32,20,.28), 0 3px 6px rgba(40,32,20,.22); }
+  .forest .mat { inset: 0; }
+  .forest .art { left: 22px; right: 22px; top: 20px; bottom: 26px;
+    background:
+      linear-gradient(90deg, transparent 22%, #3d3a22 22% 30%, transparent 30% 62%, #4a462a 62% 68%, transparent 68%),
+      radial-gradient(ellipse 60% 40% at 50% 92%, #9ab33e 0 50%, transparent 72%),
+      linear-gradient(#1d2214, #2c3a1b 60%, #6f8a2d);
+  }
+
+  /* right bottom: small colourful print in a green frame, kraft mat */
+  .small { left: 566px; top: 338px; width: 128px; height: 164px; border: 12px solid #3e5a3f; }
+  .small .mat { inset: 0; background: #b79c78; }
+  .small .art { left: 16px; right: 16px; top: 18px; bottom: 18px;
+    background:
+      radial-gradient(ellipse 9px 22px at 50% 48%, #e9e5f2 0 70%, transparent 76%),
+      radial-gradient(circle at 22% 28%, #e3b730 0 14px, transparent 15px),
+      radial-gradient(circle at 78% 70%, #cf4a32 0 12px, transparent 13px),
+      radial-gradient(circle at 76% 24%, #4f8a5a 0 12px, transparent 13px),
+      linear-gradient(#f0d86a, #d9a942 45%, #3f7a8c);
+  }
+
+  /* the calibration line with round handles, like the "Set the scale" step */
+  .measure { position: absolute; left: 136px; right: 136px; top: 628px; height: 0; border-top: 12px solid #171715; }
+  .measure::before, .measure::after { content: ""; position: absolute; top: -27px; width: 26px; height: 26px; border-radius: 50%;
+    background: #fffef9; border: 11px solid #171715; }
+  .measure::before { left: -24px; } .measure::after { right: -24px; }
+  .ticks { position: absolute; left: 160px; right: 160px; top: 652px; height: 26px;
+    background: repeating-linear-gradient(90deg, #171715 0 6px, transparent 6px 63px); opacity: .45; }
+</style>
+</head>
+<body>
+  <div class="tile">
+    <div class="frame botanical"><div class="mat"></div><div class="art"></div></div>
+    <div class="frame print"><div class="mat"></div><div class="art"></div></div>
+    <div class="frame pears"><div class="art"></div></div>
+    <div class="frame forest"><div class="mat"></div><div class="art"></div></div>
+    <div class="frame small"><div class="mat"></div><div class="art"></div></div>
+    <div class="measure"></div>
+    <div class="ticks"></div>
+  </div>
+</body>
+</html>

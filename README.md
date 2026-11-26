@@ -44,6 +44,16 @@ To use another port:
 PORT=3000 npm run dev
 ```
 
+### Desktop app (macOS)
+
+To open the studio with a double-click, build a small launcher app with its own icon:
+
+```bash
+./launcher/make-app.sh
+```
+
+This puts **Gallery Wall Studio** on your Desktop (use `--dest /Applications` to put it elsewhere). It starts the local server if it isn't already running, then opens the studio in your browser. The first time, macOS may ask to let it access your Documents folder. Server output goes to `~/Library/Logs/gallery-wall-studio.log`. Rerun the script if you move this folder. To change the icon, edit `launcher/icon.html`, run `node launcher/render-icon.mjs`, and rerun `make-app.sh`.
+
 ## How to use it
 
 1. **Upload a wall photo.** Include a ruler, measuring tape, or another object whose real length you know.
@@ -78,6 +88,9 @@ dist/
   index.html    Application markup
   styles.css    Layout and visual styles
   app.js        Calibration, editing, persistence, and export logic
+launcher/
+  make-app.sh               Builds the clickable macOS app
+  icon.html, render-icon.mjs  The app icon and the script that renders it to GalleryWallStudio.icns
 scripts/
   dev.mjs                  Local development server, project storage and background-removal API
   background-removal.mjs   BiRefNet background removal (model download, inference)
