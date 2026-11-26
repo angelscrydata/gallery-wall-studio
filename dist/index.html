@@ -82,7 +82,10 @@
 
     <section class="workspace" aria-label="Wall planning canvas">
       <div class="workspace-tools">
-        <p id="canvasHint">Begin by choosing a wall photo</p>
+        <div class="wall-tabs" id="wallTabs" hidden>
+          <div class="wall-tab-list" id="wallTabList" role="tablist" aria-label="Walls in this project"></div>
+          <button class="wall-tab-add" id="addWallButton" type="button" aria-label="Add a wall" title="Add a wall">+</button>
+        </div>
         <div class="workspace-actions">
           <button class="spacing-toggle" id="spacingToggle" type="button" aria-pressed="false" disabled>Show distances</button>
           <div class="zoom-controls" aria-label="Zoom controls">
@@ -91,10 +94,6 @@
             <button id="zoomIn" type="button" aria-label="Zoom in" disabled>+</button>
           </div>
         </div>
-      </div>
-      <div class="wall-tabs" id="wallTabs" hidden>
-        <div class="wall-tab-list" id="wallTabList" role="tablist" aria-label="Walls in this project"></div>
-        <button class="wall-tab-add" id="addWallButton" type="button" aria-label="Add a wall" title="Add a wall">+</button>
       </div>
       <div class="stage-wrap" id="stageWrap">
         <div class="empty-state" id="emptyState">
@@ -110,7 +109,10 @@
           <svg id="spacingLayer" class="spacing-layer" aria-hidden="true"></svg>
         </div>
       </div>
-      <p class="keyboard-note">Drag the wall to pan when zoomed. Select a frame to move it with arrow keys; press Delete to remove it.</p>
+      <div class="workspace-footer">
+        <p class="canvas-hint" id="canvasHint" aria-live="polite">Begin by choosing a wall photo</p>
+        <p class="keyboard-note">Drag the wall to pan when zoomed. Select a frame to move it with arrow keys; press Delete to remove it.</p>
+      </div>
     </section>
 
     <aside class="frame-sidebar" aria-label="Scaled frame library">
