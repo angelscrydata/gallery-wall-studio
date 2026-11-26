@@ -125,7 +125,7 @@
         <div><p class="eyebrow">Your collection</p><h2>Frames</h2></div>
         <span id="frameCount">0</span>
       </div>
-      <p class="frame-help">Drag a frame onto the wall to place it. Double-click it here to crop, straighten, or rotate it.</p>
+      <p class="frame-help">Drag a frame onto the wall to place it. Double-click it here to crop, straighten, rotate, or remove its background.</p>
       <div id="artLibrary" class="art-library">
         <div class="empty-library">Your scaled frames will appear here.</div>
       </div>
@@ -146,6 +146,8 @@
       <p>Place each corner on the outside edge of the frame. The selected shape will be straightened into a rectangle.</p>
       <div class="crop-canvas" id="cropCanvas">
         <img id="editorPreviewImage" alt="Frame crop preview" draggable="false" />
+        <canvas id="cutoutPreview" class="cutout-preview" hidden></canvas>
+        <div class="brush-cursor" id="brushCursor" hidden></div>
         <svg class="crop-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon id="cropPolygon" points="0,0 100,0 100,100 0,100"></polygon></svg>
         <button class="crop-corner" data-corner="0" type="button" aria-label="Move top-left corner"></button>
         <button class="crop-corner" data-corner="1" type="button" aria-label="Move top-right corner"></button>
@@ -153,6 +155,25 @@
         <button class="crop-corner" data-corner="3" type="button" aria-label="Move bottom-left corner"></button>
       </div>
       <p class="crop-help">Drag each corner independently, like a document scanner. Apply stretches the selected polygon to the frame dimensions.</p>
+      <div class="cutout-controls">
+        <div class="cutout-row">
+          <button class="button button-outline" id="removeBackgroundButton" type="button">Remove background</button>
+          <p class="cutout-status" id="cutoutStatus" aria-live="polite">For odd shapes and objects that aren’t rectangular frames.</p>
+        </div>
+        <div class="cutout-tools" id="cutoutTools" hidden>
+          <div class="tool-toggle" role="group" aria-label="Editing tool">
+            <button type="button" data-tool="corners" class="is-active" aria-pressed="true">Corners</button>
+            <button type="button" data-tool="keep" aria-pressed="false">Keep brush</button>
+            <button type="button" data-tool="erase" aria-pressed="false">Erase brush</button>
+          </div>
+          <label class="brush-size">Brush <input id="brushSize" type="range" min="0.5" max="15" step="0.5" value="4" /></label>
+          <div class="cutout-actions">
+            <button type="button" class="text-button" id="undoStrokeButton">Undo stroke</button>
+            <button type="button" class="text-button" id="fitCornersButton">Fit corners to cutout</button>
+            <button type="button" class="text-button" id="clearCutoutButton">Restore background</button>
+          </div>
+        </div>
+      </div>
       <div class="editor-controls">
         <label>Straighten <output id="rotationOutput">0°</output><input id="frameRotation" type="range" min="-6" max="6" step="0.1" value="0" /></label>
         <button class="button button-outline" id="rotateFrameButton" type="button">Rotate frame 90°</button>

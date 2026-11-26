@@ -23,7 +23,9 @@ const els = {
   frameEditorDialog: $('#frameEditorDialog'), frameEditorForm: $('#frameEditorForm'), editorClose: $('#editorClose'),
   cropCanvas: $('#cropCanvas'), cropPolygon: $('#cropPolygon'), cropCorners: [...document.querySelectorAll('.crop-corner')], editorPreviewImage: $('#editorPreviewImage'),
   frameRotation: $('#frameRotation'), rotationOutput: $('#rotationOutput'), editorReset: $('#editorReset'),
-  rotateFrameButton: $('#rotateFrameButton'), selectionStatus: $('#selectionStatus'), undoButton: $('#undoButton'), redoButton: $('#redoButton'), wallTabs: $('#wallTabs'), wallTabList: $('#wallTabList'), addWallButton: $('#addWallButton')
+  rotateFrameButton: $('#rotateFrameButton'), selectionStatus: $('#selectionStatus'), undoButton: $('#undoButton'), redoButton: $('#redoButton'),
+  cutoutPreview: $('#cutoutPreview'), brushCursor: $('#brushCursor'), removeBackgroundButton: $('#removeBackgroundButton'), cutoutStatus: $('#cutoutStatus'),
+  cutoutTools: $('#cutoutTools'), brushSize: $('#brushSize'), undoStrokeButton: $('#undoStrokeButton'), fitCornersButton: $('#fitCornersButton'), clearCutoutButton: $('#clearCutoutButton'), wallTabs: $('#wallTabs'), wallTabList: $('#wallTabList'), addWallButton: $('#addWallButton')
 };
 
 function isHeic(file) {
@@ -662,7 +664,8 @@ function openFrameEditor(artId) {
     { x: art.cropLeft, y: art.cropTop + art.cropHeight }
   ];
   editorDraftUrl = art.sourceUrl || art.url; editorDraftWidth = art.width; editorDraftHeight = art.height;
-  els.editorPreviewImage.onload = () => { els.cropCanvas.style.aspectRatio = `${els.editorPreviewImage.naturalWidth} / ${els.editorPreviewImage.naturalHeight}`; syncCropPolygon(); };
+  editorMask = art.cutout ? cloneCutout(art.cutout) : null; setEditorTool('corners'); setCutoutStatus('');
+  els.editorPreviewImage.onload = () => { els.cropCanvas.style.aspectRatio = `${els.editorPreviewImage.naturalWidth} / ${els.editorPreviewImage.naturalHeight}`; syncCropPolygon(); buildCutoutPreview(); };
   els.editorPreviewImage.src = editorDraftUrl; els.frameRotation.value = art.rotation || 0; updateRotationOutput();
   els.frameEditorDialog.showModal(); if (els.editorPreviewImage.complete) els.editorPreviewImage.onload();
 }
@@ -677,8 +680,10 @@ function syncCropPolygon() {
 function updateEditorRotationPreview() {
   if (!cropDraft) return;
   const center = cropDraft.reduce((total, point) => ({ x: total.x + point.x / 4, y: total.y + point.y / 4 }), { x: 0, y: 0 });
-  els.editorPreviewImage.style.transformOrigin = `${center.x * 100}% ${center.y * 100}%`;
-  els.editorPreviewImage.style.transform = `rotate(${Number(els.frameRotation.value)}deg)`;
+  [els.editorPreviewImage, els.cutoutPreview].forEach(element => {
+    element.style.transformOrigin = `${center.x * 100}% ${center.y * 100}%`;
+    element.style.transform = `rotate(${Number(els.frameRotation.value)}deg)`;
+  });
 }
 function updateRotationOutput() { els.rotationOutput.textContent = `${Number(els.frameRotation.value).toFixed(1)}°`; updateEditorRotationPreview(); }
 els.frameRotation.addEventListener('input', updateRotationOutput);
@@ -710,6 +715,7 @@ els.rotateFrameButton.addEventListener('click', async () => {
   els.rotateFrameButton.disabled = true;
   try {
     editorDraftUrl = await rotateDataUrl90(editorDraftUrl);
+    if (editorMask) editorMask = { maskUrl: await rotateDataUrl90(editorMask.maskUrl), strokes: editorMask.strokes.map(stroke => ({ ...stroke, points: stroke.points.map(point => ({ x: 1 - point.y, y: point.x })) })) };
     const rotatedCorners = cropDraft.map(point => ({ x: 1 - point.y, y: point.x }));
     cropDraft = [rotatedCorners[3], rotatedCorners[0], rotatedCorners[1], rotatedCorners[2]];
     [editorDraftWidth, editorDraftHeight] = [editorDraftHeight, editorDraftWidth];
@@ -730,8 +736,8 @@ els.editorReset.addEventListener('click', () => {
   const art = state.art.find(candidate => candidate.id === editingArtId); if (!art) return;
   editorDraftUrl = art.originalUrl || art.sourceUrl || art.url;
   editorDraftWidth = art.originalWidth ?? art.width; editorDraftHeight = art.originalHeight ?? art.height;
-  cropDraft = fullCropCorners(); els.frameRotation.value = 0;
-  els.editorPreviewImage.src = editorDraftUrl; syncCropPolygon(); updateRotationOutput();
+  cropDraft = fullCropCorners(); els.frameRotation.value = 0; editorMask = null; setEditorTool('corners'); setCutoutStatus('');
+  els.editorPreviewImage.src = editorDraftUrl; syncCropPolygon(); updateRotationOutput(); buildCutoutPreview();
 });
 els.editorClose.addEventListener('click', () => els.frameEditorDialog.close());
 els.frameEditorForm.addEventListener('submit', async event => {
@@ -740,8 +746,10 @@ els.frameEditorForm.addEventListener('submit', async event => {
   const oldWidth = art.width, oldHeight = art.height;
   const dimensionsSwapped = nearlyEqual(editorDraftWidth, oldHeight) && nearlyEqual(editorDraftHeight, oldWidth) && !nearlyEqual(oldWidth, oldHeight);
   try {
-    art.url = await rectifyDataUrl(editorDraftUrl, cropDraft); art.width = editorDraftWidth; art.height = editorDraftHeight;
+    const cropSource = editorMask ? await applyCutout(editorDraftUrl, editorMask) : editorDraftUrl;
+    art.url = await rectifyDataUrl(cropSource, cropDraft); art.width = editorDraftWidth; art.height = editorDraftHeight;
     art.sourceUrl = editorDraftUrl; art.cropCorners = cropDraft.map(point => ({ ...point }));
+    if (editorMask) art.cutout = cloneCutout(editorMask); else delete art.cutout;
     art.cropLeft = 0; art.cropTop = 0; art.cropWidth = 1; art.cropHeight = 1; art.rotation = Number(els.frameRotation.value);
     if (dimensionsSwapped) rotatePlacedCopies(art.id);
     else if (!nearlyEqual(oldWidth, art.width) || !nearlyEqual(oldHeight, art.height)) resizePlacedCopies(art);
@@ -749,6 +757,184 @@ els.frameEditorForm.addEventListener('submit', async event => {
     els.frameEditorDialog.close(); renderLibrary(); renderPlaced(); queueSave();
   } catch (error) { window.alert(`Could not straighten this frame. ${error.message}`); }
   finally { submitButton.disabled = false; submitButton.textContent = 'Apply'; }
+});
+
+// ---- Background removal (cutouts) ---------------------------------------------
+// "Remove background" asks the local server for a mask (BiRefNet), then the keep/erase brushes
+// refine it. The cutout is non-destructive: the frame keeps its source photo plus
+// { maskUrl, strokes } and is re-composited whenever the editor is applied.
+// Brush sizes and stroke points are fractions of the image (size = % of its longer side).
+let editorMask = null, cutoutPreview = null, editorTool = 'corners', activeStroke = null;
+
+function cloneCutout(cutout) {
+  return { maskUrl: cutout.maskUrl, strokes: (cutout.strokes || []).map(stroke => ({ ...stroke, points: stroke.points.map(point => ({ ...point })) })) };
+}
+function setCutoutStatus(text) {
+  els.cutoutStatus.textContent = text || (editorMask ? 'Use the Keep and Erase brushes to fix anything the cutout got wrong.' : 'For odd shapes and objects that aren’t rectangular frames.');
+}
+function updateCutoutControls() {
+  els.cutoutTools.hidden = !editorMask;
+  els.removeBackgroundButton.textContent = editorMask ? 'Remove background again' : 'Remove background';
+  els.undoStrokeButton.disabled = !editorMask?.strokes.length;
+}
+function setEditorTool(tool) {
+  editorTool = editorMask ? tool : 'corners';
+  els.cutoutTools.querySelectorAll('[data-tool]').forEach(button => { const on = button.dataset.tool === editorTool; button.classList.toggle('is-active', on); button.setAttribute('aria-pressed', String(on)); });
+  els.cropCanvas.classList.toggle('is-brushing', editorTool !== 'corners');
+  els.brushCursor.classList.toggle('is-erase', editorTool === 'erase');
+  if (editorTool === 'corners') els.brushCursor.hidden = true;
+}
+els.cutoutTools.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => setEditorTool(button.dataset.tool)));
+
+function drawStroke(context, stroke, width, height, fromIndex = 0) {
+  const diameter = stroke.size / 100 * Math.max(width, height), points = stroke.points;
+  context.save(); context.strokeStyle = context.fillStyle = stroke.mode === 'keep' ? '#fff' : '#000';
+  context.lineWidth = diameter; context.lineCap = 'round'; context.lineJoin = 'round';
+  if (points.length === 1 || fromIndex === points.length - 1 && fromIndex === 0) {
+    context.beginPath(); context.arc(points[0].x * width, points[0].y * height, diameter / 2, 0, Math.PI * 2); context.fill();
+  } else {
+    context.beginPath(); const start = Math.max(0, fromIndex - 1);
+    context.moveTo(points[start].x * width, points[start].y * height);
+    for (let index = start + 1; index < points.length; index += 1) context.lineTo(points[index].x * width, points[index].y * height);
+    context.stroke();
+  }
+  context.restore();
+}
+
+// Draws the photo with the mask (and strokes) applied as transparency, at `width` × `height`.
+async function maskedImageData(url, cutout, maxSide) {
+  const [base, mask] = await Promise.all([imageFromUrl(url, 'The frame photo'), imageFromUrl(cutout.maskUrl, 'The cutout mask')]);
+  const scale = maxSide ? Math.min(1, maxSide / Math.max(base.naturalWidth, base.naturalHeight)) : 1;
+  const width = Math.max(1, Math.round(base.naturalWidth * scale)), height = Math.max(1, Math.round(base.naturalHeight * scale));
+  const baseCanvas = Object.assign(document.createElement('canvas'), { width, height }), baseContext = baseCanvas.getContext('2d', { willReadFrequently: true });
+  baseContext.drawImage(base, 0, 0, width, height);
+  const maskCanvas = Object.assign(document.createElement('canvas'), { width, height }), maskContext = maskCanvas.getContext('2d', { willReadFrequently: true });
+  maskContext.drawImage(mask, 0, 0, width, height);
+  cutout.strokes.forEach(stroke => drawStroke(maskContext, stroke, width, height));
+  return { width, height, base: baseContext.getImageData(0, 0, width, height), maskCanvas, maskContext };
+}
+function compositeInto(target, base, maskContext, width, height) {
+  const mask = maskContext.getImageData(0, 0, width, height).data, out = target.data;
+  out.set(base.data);
+  for (let index = 3; index < out.length; index += 4) out[index] = Math.round(base.data[index] * mask[index - 3] / 255);
+}
+
+async function applyCutout(url, cutout) {
+  const { width, height, base, maskContext } = await maskedImageData(url, cutout);
+  const canvas = Object.assign(document.createElement('canvas'), { width, height }), context = canvas.getContext('2d');
+  const output = context.createImageData(width, height); compositeInto(output, base, maskContext, width, height);
+  context.putImageData(output, 0, 0); return canvas.toDataURL('image/png');
+}
+
+let previewBuildToken = 0;
+async function buildCutoutPreview() {
+  const token = previewBuildToken += 1;
+  if (!editorMask) { cutoutPreview = null; els.cutoutPreview.hidden = true; els.editorPreviewImage.style.visibility = ''; updateCutoutControls(); return; }
+  const preview = await maskedImageData(editorDraftUrl, editorMask, 1400);
+  if (token !== previewBuildToken) return;
+  Object.assign(els.cutoutPreview, { width: preview.width, height: preview.height });
+  preview.context = els.cutoutPreview.getContext('2d'); preview.output = preview.context.createImageData(preview.width, preview.height);
+  cutoutPreview = preview; renderCutoutPreview();
+  els.cutoutPreview.hidden = false; els.editorPreviewImage.style.visibility = 'hidden'; updateCutoutControls(); updateEditorRotationPreview();
+}
+function renderCutoutPreview() {
+  if (!cutoutPreview) return;
+  const { base, maskContext, width, height, output, context } = cutoutPreview;
+  compositeInto(output, base, maskContext, width, height); context.putImageData(output, 0, 0);
+}
+async function redrawCutoutMask() {
+  if (!cutoutPreview || !editorMask) return;
+  const mask = await imageFromUrl(editorMask.maskUrl), { maskContext, width, height } = cutoutPreview;
+  maskContext.clearRect(0, 0, width, height); maskContext.drawImage(mask, 0, 0, width, height);
+  editorMask.strokes.forEach(stroke => drawStroke(maskContext, stroke, width, height));
+  renderCutoutPreview(); updateCutoutControls();
+}
+
+// Brushing: offsetX/offsetY are in the canvas's own (un-rotated) coordinates, so straightening doesn't skew strokes.
+function strokePoint(event) {
+  return { x: clamp(event.offsetX / els.cutoutPreview.clientWidth, 0, 1), y: clamp(event.offsetY / els.cutoutPreview.clientHeight, 0, 1) };
+}
+function moveBrushCursor(event) {
+  if (editorTool === 'corners' || !cutoutPreview) { els.brushCursor.hidden = true; return; }
+  const rect = els.cropCanvas.getBoundingClientRect(), diameter = Number(els.brushSize.value) / 100 * Math.max(els.cutoutPreview.clientWidth, els.cutoutPreview.clientHeight);
+  Object.assign(els.brushCursor.style, { left: `${event.clientX - rect.left}px`, top: `${event.clientY - rect.top}px`, width: `${diameter}px`, height: `${diameter}px` });
+  els.brushCursor.hidden = false;
+}
+els.cutoutPreview.addEventListener('pointerdown', event => {
+  if (editorTool === 'corners' || !cutoutPreview || event.button !== 0) return;
+  event.preventDefault(); els.cutoutPreview.setPointerCapture(event.pointerId);
+  activeStroke = { mode: editorTool, size: Number(els.brushSize.value), points: [strokePoint(event)] };
+  drawStroke(cutoutPreview.maskContext, activeStroke, cutoutPreview.width, cutoutPreview.height); renderCutoutPreview();
+});
+els.cutoutPreview.addEventListener('pointermove', event => {
+  moveBrushCursor(event);
+  if (!activeStroke) return;
+  activeStroke.points.push(strokePoint(event));
+  drawStroke(cutoutPreview.maskContext, activeStroke, cutoutPreview.width, cutoutPreview.height, activeStroke.points.length - 1); renderCutoutPreview();
+});
+function endStroke() {
+  if (!activeStroke) return;
+  editorMask.strokes.push(activeStroke); activeStroke = null; updateCutoutControls();
+}
+els.cutoutPreview.addEventListener('pointerup', endStroke); els.cutoutPreview.addEventListener('pointercancel', endStroke);
+els.cutoutPreview.addEventListener('pointerleave', () => { els.brushCursor.hidden = true; });
+els.brushSize.addEventListener('input', () => { if (!els.brushCursor.hidden) els.brushCursor.style.width = els.brushCursor.style.height = `${Number(els.brushSize.value) / 100 * Math.max(els.cutoutPreview.clientWidth, els.cutoutPreview.clientHeight)}px`; });
+els.undoStrokeButton.addEventListener('click', () => { if (editorMask?.strokes.length) { editorMask.strokes.pop(); redrawCutoutMask(); } });
+els.clearCutoutButton.addEventListener('click', () => { editorMask = null; setEditorTool('corners'); setCutoutStatus(''); buildCutoutPreview(); });
+
+// Puts the four crop corners on the bounding box of what the cutout keeps.
+function fitCornersToCutout() {
+  if (!cutoutPreview) return false;
+  const { width, height, maskContext } = cutoutPreview, mask = maskContext.getImageData(0, 0, width, height).data;
+  let left = width, top = height, right = -1, bottom = -1;
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    if (mask[(y * width + x) * 4] > 127) { if (x < left) left = x; if (x > right) right = x; if (y < top) top = y; if (y > bottom) bottom = y; }
+  }
+  if (right < left || bottom < top) return false;
+  const l = left / width, t = top / height, r = (right + 1) / width, b = (bottom + 1) / height;
+  cropDraft = [{ x: l, y: t }, { x: r, y: t }, { x: r, y: b }, { x: l, y: b }]; syncCropPolygon(); return true;
+}
+els.fitCornersButton.addEventListener('click', fitCornersToCutout);
+const isFullCrop = corners => corners.every((point, index) => Math.abs(point.x - fullCropCorners()[index].x) < .002 && Math.abs(point.y - fullCropCorners()[index].y) < .002);
+
+function blobFromUrl(url, maxSide) {
+  return imageFromUrl(url, 'The frame photo').then(image => new Promise((resolve, reject) => {
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = Object.assign(document.createElement('canvas'), { width: Math.round(image.naturalWidth * scale), height: Math.round(image.naturalHeight * scale) });
+    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not prepare the photo.')), 'image/jpeg', .92);
+  }));
+}
+const blobToDataUrl = blob => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(blob); });
+
+els.removeBackgroundButton.addEventListener('click', async () => {
+  const artId = editingArtId, draftUrl = editorDraftUrl, button = els.removeBackgroundButton;
+  button.disabled = true; els.clearCutoutButton.disabled = true; setCutoutStatus('Finding the object…');
+  let poll = null;
+  try {
+    const status = await fetch('/api/background-removal/status').then(response => response.json()).catch(() => null);
+    if (!status) throw new Error('The local server isn’t running. Start it with npm run dev.');
+    if (!status.modelOnDisk) {
+      setCutoutStatus('Downloading the background-removal model. This happens once and is about 930 MB…');
+      poll = setInterval(async () => {
+        const current = await fetch('/api/background-removal/status').then(response => response.json()).catch(() => null);
+        if (current?.state === 'downloading' && current.totalBytes) setCutoutStatus(`Downloading the background-removal model (first time only): ${Math.round(100 * current.receivedBytes / current.totalBytes)}%`);
+        else if (current?.state === 'loading') setCutoutStatus('Loading the model…');
+        else if (current?.state === 'ready') setCutoutStatus('Finding the object…');
+      }, 700);
+    } else if (status.state !== 'ready') setCutoutStatus('Loading the model, then finding the object…');
+    let response;
+    try { response = await fetch('/api/background-removal', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: await blobFromUrl(draftUrl, 2048) }); }
+    catch { throw new Error('The local server isn’t running. Start it with npm run dev.'); }
+    if (!response.ok) throw new Error(await response.text() || `The server returned ${response.status}.`);
+    const maskUrl = await blobToDataUrl(await response.blob());
+    if (editingArtId !== artId || editorDraftUrl !== draftUrl || !els.frameEditorDialog.open) return;
+    editorMask = { maskUrl, strokes: [] }; await buildCutoutPreview();
+    const fitted = isFullCrop(cropDraft) && fitCornersToCutout();
+    setEditorTool('corners');
+    setCutoutStatus(fitted ? 'Background removed and corners fitted to the object. Fix any mistakes with the Keep and Erase brushes.' : 'Background removed. Fix any mistakes with the Keep and Erase brushes.');
+  } catch (error) { setCutoutStatus(`Couldn’t remove the background. ${error.message}`); }
+  finally { clearInterval(poll); button.disabled = false; els.clearCutoutButton.disabled = false; }
 });
 
 function isValidCropPolygon(points) {

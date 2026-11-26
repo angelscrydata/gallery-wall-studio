@@ -188,6 +188,28 @@ dialog form > p:not(.eyebrow) { color: var(--muted); line-height: 1.5; }
 .crop-overlay polygon { fill: rgba(255,254,249,.08); stroke: var(--white); stroke-width: .7; vector-effect: non-scaling-stroke; filter: drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
 .crop-corner { position: absolute; width: 30px; height: 30px; padding: 0; border: 3px solid var(--white); background: transparent; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--ink), 0 2px 8px rgba(0,0,0,.38); transform: translate(-50%, -50%); cursor: move; touch-action: none; }
 .crop-corner:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+.cutout-preview { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.cutout-preview[hidden] { display: none; }
+.crop-canvas.is-brushing .crop-corner { pointer-events: none; opacity: .3; }
+.crop-canvas.is-brushing .cutout-preview { cursor: none; touch-action: none; }
+.brush-cursor { position: absolute; z-index: 4; border: 1.5px solid var(--white); border-radius: 50%; box-shadow: 0 0 0 1px var(--ink); transform: translate(-50%, -50%); pointer-events: none; }
+.brush-cursor.is-erase { border-style: dashed; }
+.brush-cursor[hidden] { display: none; }
+.cutout-controls { margin: 0 0 20px; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; gap: 12px; }
+.cutout-row { display: flex; align-items: center; gap: 14px; }
+.cutout-row .button { flex: none; }
+.cutout-status { margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.4; }
+.cutout-tools { display: grid; gap: 10px; }
+.cutout-tools[hidden] { display: none; }
+.tool-toggle { display: flex; border: 1px solid var(--line); width: fit-content; }
+.tool-toggle button { border: 0; background: var(--panel); padding: 7px 12px; font: inherit; font-size: .74rem; color: var(--ink); cursor: pointer; }
+.tool-toggle button + button { border-left: 1px solid var(--line); }
+.tool-toggle button.is-active { background: var(--ink); color: var(--white); }
+.brush-size { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
+.brush-size input { flex: 1; accent-color: var(--ink); }
+.cutout-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.cutout-actions .text-button { font-size: .74rem; }
+.cutout-actions .text-button:disabled { opacity: .35; cursor: default; }
 .crop-help { margin: 0 auto 22px; max-width: 400px; text-align: center; font-size: .76rem; }
 .editor-controls { display: grid; gap: 16px; }
 .editor-controls label { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }

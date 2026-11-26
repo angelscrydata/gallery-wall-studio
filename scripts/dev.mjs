@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
+import { createBackgroundRemover } from './background-removal.mjs';
 
 const root = new URL('../dist/', import.meta.url).pathname;
 const heicVendor = new URL('../node_modules/heic2any/dist/heic2any.min.js', import.meta.url).pathname;
@@ -8,6 +9,7 @@ const dataDirectory = process.env.GALLERY_WALL_DATA_DIR ? resolve(process.env.GA
 const projectsDirectory = join(dataDirectory, 'projects');
 const legacyProjectsFile = join(dataDirectory, 'projects.json');
 const deletedFile = join(dataDirectory, 'deleted.json');
+const backgroundRemover = createBackgroundRemover(join(dataDirectory, 'models'));
 const port = Number(process.env.PORT) || 4173;
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 
@@ -70,9 +72,32 @@ function readJsonBody(request) {
   });
 }
 
+function readRawBody(request, limit = 150 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let size = 0;
+    request.on('data', chunk => { size += chunk.length; if (size <= limit) chunks.push(chunk); });
+    request.on('end', () => size > limit ? reject(Object.assign(new Error('Image is too large.'), { status: 413 })) : resolve(Buffer.concat(chunks)));
+    request.on('error', reject);
+  });
+}
+
 function sendJson(response, status, value) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   response.end(JSON.stringify(value));
+}
+
+async function handleBackgroundRemovalApi(request, response, pathname) {
+  if (pathname === '/api/background-removal/status' && request.method === 'GET') {
+    sendJson(response, 200, { ...backgroundRemover.status(), modelOnDisk: await backgroundRemover.modelOnDisk() }); return true;
+  }
+  if (pathname === '/api/background-removal' && request.method === 'POST') {
+    const image = await readRawBody(request);
+    if (!image.length) { sendJson(response, 400, { error: 'No image was sent.' }); return true; }
+    const started = Date.now(), mask = await backgroundRemover.createMask(image);
+    console.log(`Removed a background in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+    response.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' }); response.end(mask); return true;
+  }
+  return false;
 }
 
 async function handleProjectsApi(request, response, pathname) {
@@ -112,6 +137,7 @@ const server = createServer(async (request, response) => {
   try {
     const pathname = decodeURIComponent(new URL(request.url, `http://${request.headers.host}`).pathname);
     if (await handleProjectsApi(request, response, pathname)) return;
+    if (await handleBackgroundRemovalApi(request, response, pathname)) return;
     const safePath = normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, '');
     let filePath = pathname === '/vendor/heic2any.min.js' ? heicVendor : join(root, safePath === '/' ? 'index.html' : safePath);
     if ((await stat(filePath)).isDirectory()) filePath = join(filePath, 'index.html');
