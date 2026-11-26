@@ -25,7 +25,8 @@ const els = {
   frameRotation: $('#frameRotation'), rotationOutput: $('#rotationOutput'), editorReset: $('#editorReset'),
   rotateFrameButton: $('#rotateFrameButton'), selectionStatus: $('#selectionStatus'), undoButton: $('#undoButton'), redoButton: $('#redoButton'),
   cutoutPreview: $('#cutoutPreview'), brushCursor: $('#brushCursor'), removeBackgroundButton: $('#removeBackgroundButton'), cutoutStatus: $('#cutoutStatus'),
-  cutoutTools: $('#cutoutTools'), brushSize: $('#brushSize'), undoStrokeButton: $('#undoStrokeButton'), fitCornersButton: $('#fitCornersButton'), clearCutoutButton: $('#clearCutoutButton'), wallTabs: $('#wallTabs'), wallTabList: $('#wallTabList'), addWallButton: $('#addWallButton')
+  cutoutTools: $('#cutoutTools'), brushSize: $('#brushSize'), cutoutIntro: $('#cutoutIntro'), brushRow: $('#brushRow'), brushPreview: $('#brushPreview'),
+  redetectButton: $('#redetectButton'), editorHint: $('#editorHint'), editorEyebrow: $('#editorEyebrow'), editorCancel: $('#editorCancel'), undoStrokeButton: $('#undoStrokeButton'), fitCornersButton: $('#fitCornersButton'), clearCutoutButton: $('#clearCutoutButton'), wallTabs: $('#wallTabs'), wallTabList: $('#wallTabList'), addWallButton: $('#addWallButton')
 };
 
 function isHeic(file) {
@@ -665,7 +666,8 @@ function openFrameEditor(artId) {
   ];
   editorDraftUrl = art.sourceUrl || art.url; editorDraftWidth = art.width; editorDraftHeight = art.height;
   editorMask = art.cutout ? cloneCutout(art.cutout) : null; setEditorTool('corners'); setCutoutStatus('');
-  els.editorPreviewImage.onload = () => { els.cropCanvas.style.aspectRatio = `${els.editorPreviewImage.naturalWidth} / ${els.editorPreviewImage.naturalHeight}`; syncCropPolygon(); buildCutoutPreview(); };
+  els.editorEyebrow.textContent = `${art.name.replace(/\.[^.]+$/, '')} · ${art.width} × ${art.height} ${art.unit}`;
+  els.editorPreviewImage.onload = () => { els.cropCanvas.style.aspectRatio = `${els.editorPreviewImage.naturalWidth} / ${els.editorPreviewImage.naturalHeight}`; els.cropCanvas.style.setProperty('--ratio', els.editorPreviewImage.naturalWidth / els.editorPreviewImage.naturalHeight); syncCropPolygon(); buildCutoutPreview(); };
   els.editorPreviewImage.src = editorDraftUrl; els.frameRotation.value = art.rotation || 0; updateRotationOutput();
   els.frameEditorDialog.showModal(); if (els.editorPreviewImage.complete) els.editorPreviewImage.onload();
 }
@@ -769,20 +771,31 @@ let editorMask = null, cutoutPreview = null, editorTool = 'corners', activeStrok
 function cloneCutout(cutout) {
   return { maskUrl: cutout.maskUrl, strokes: (cutout.strokes || []).map(stroke => ({ ...stroke, points: stroke.points.map(point => ({ ...point })) })) };
 }
-function setCutoutStatus(text) {
-  els.cutoutStatus.textContent = text || (editorMask ? 'Use the Keep and Erase brushes to fix anything the cutout got wrong.' : 'For odd shapes and objects that aren’t rectangular frames.');
-}
+function setCutoutStatus(text) { els.cutoutStatus.textContent = text || ''; els.cutoutStatus.hidden = !text; }
 function updateCutoutControls() {
-  els.cutoutTools.hidden = !editorMask;
-  els.removeBackgroundButton.textContent = editorMask ? 'Remove background again' : 'Remove background';
+  els.cutoutIntro.hidden = Boolean(editorMask); els.cutoutTools.hidden = !editorMask;
   els.undoStrokeButton.disabled = !editorMask?.strokes.length;
+}
+function updateEditorHint() {
+  const brushKeys = ` <kbd>[</kbd> <kbd>]</kbd> change the size · <kbd>${shortcutModifier}Z</kbd> undoes a stroke.`;
+  els.editorHint.innerHTML = editorTool === 'keep' ? `Paint over anything that was removed by mistake.${brushKeys}`
+    : editorTool === 'erase' ? `Paint over leftover background.${brushKeys}`
+    : editorMask ? 'Drag the corners to the object’s outer edges. Use Paint back or Erase to fix the cutout.'
+    : 'Drag the four corners to the outside edges of the frame. Apply straightens it to its real size.';
+}
+function updateBrushPreview() {
+  const diameter = Number(els.brushSize.value) / 100 * Math.max(els.cutoutPreview.clientWidth || 300, els.cutoutPreview.clientHeight || 300);
+  els.brushPreview.style.width = els.brushPreview.style.height = `${clamp(diameter, 3, 30)}px`;
+  if (!els.brushCursor.hidden) els.brushCursor.style.width = els.brushCursor.style.height = `${diameter}px`;
 }
 function setEditorTool(tool) {
   editorTool = editorMask ? tool : 'corners';
   els.cutoutTools.querySelectorAll('[data-tool]').forEach(button => { const on = button.dataset.tool === editorTool; button.classList.toggle('is-active', on); button.setAttribute('aria-pressed', String(on)); });
   els.cropCanvas.classList.toggle('is-brushing', editorTool !== 'corners');
   els.brushCursor.classList.toggle('is-erase', editorTool === 'erase');
+  els.brushRow.hidden = editorTool === 'corners';
   if (editorTool === 'corners') els.brushCursor.hidden = true;
+  updateEditorHint(); updateBrushPreview();
 }
 els.cutoutTools.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => setEditorTool(button.dataset.tool)));
 
@@ -878,9 +891,20 @@ function endStroke() {
 }
 els.cutoutPreview.addEventListener('pointerup', endStroke); els.cutoutPreview.addEventListener('pointercancel', endStroke);
 els.cutoutPreview.addEventListener('pointerleave', () => { els.brushCursor.hidden = true; });
-els.brushSize.addEventListener('input', () => { if (!els.brushCursor.hidden) els.brushCursor.style.width = els.brushCursor.style.height = `${Number(els.brushSize.value) / 100 * Math.max(els.cutoutPreview.clientWidth, els.cutoutPreview.clientHeight)}px`; });
+els.brushSize.addEventListener('input', updateBrushPreview);
+els.redetectButton.addEventListener('click', () => els.removeBackgroundButton.click());
+els.editorCancel.addEventListener('click', () => els.frameEditorDialog.close());
+// Inside the editor: ⌘Z / Ctrl+Z undoes the last brush stroke, [ and ] change the brush size.
+els.frameEditorDialog.addEventListener('keydown', event => {
+  if (event.target.matches?.('input[type="text"], input:not([type]), textarea')) return;
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'z' && editorMask?.strokes.length) { event.preventDefault(); els.undoStrokeButton.click(); return; }
+  if ((event.key === '[' || event.key === ']') && editorTool !== 'corners') {
+    event.preventDefault(); els.brushSize.value = clamp(Number(els.brushSize.value) + (event.key === ']' ? 1 : -1), Number(els.brushSize.min), Number(els.brushSize.max)); updateBrushPreview();
+  }
+});
 els.undoStrokeButton.addEventListener('click', () => { if (editorMask?.strokes.length) { editorMask.strokes.pop(); redrawCutoutMask(); } });
 els.clearCutoutButton.addEventListener('click', () => { editorMask = null; setEditorTool('corners'); setCutoutStatus(''); buildCutoutPreview(); });
+els.fitCornersButton.addEventListener('click', () => { if (fitCornersToCutout()) setEditorTool('corners'); });
 
 // Puts the four crop corners on the bounding box of what the cutout keeps.
 function fitCornersToCutout() {
@@ -894,7 +918,6 @@ function fitCornersToCutout() {
   const l = left / width, t = top / height, r = (right + 1) / width, b = (bottom + 1) / height;
   cropDraft = [{ x: l, y: t }, { x: r, y: t }, { x: r, y: b }, { x: l, y: b }]; syncCropPolygon(); return true;
 }
-els.fitCornersButton.addEventListener('click', fitCornersToCutout);
 const isFullCrop = corners => corners.every((point, index) => Math.abs(point.x - fullCropCorners()[index].x) < .002 && Math.abs(point.y - fullCropCorners()[index].y) < .002);
 
 function blobFromUrl(url, maxSide) {
@@ -908,8 +931,10 @@ function blobFromUrl(url, maxSide) {
 const blobToDataUrl = blob => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(blob); });
 
 els.removeBackgroundButton.addEventListener('click', async () => {
-  const artId = editingArtId, draftUrl = editorDraftUrl, button = els.removeBackgroundButton;
-  button.disabled = true; els.clearCutoutButton.disabled = true; setCutoutStatus('Finding the object…');
+  const artId = editingArtId, draftUrl = editorDraftUrl, button = els.removeBackgroundButton, label = button.querySelector('span');
+  if (button.disabled) return;
+  const busy = on => { [button, els.redetectButton, els.clearCutoutButton].forEach(control => { control.disabled = on; }); label.textContent = on ? 'Removing background…' : 'Remove background'; };
+  busy(true); setCutoutStatus('Finding the object… this takes a few seconds.');
   let poll = null;
   try {
     const status = await fetch('/api/background-removal/status').then(response => response.json()).catch(() => null);
@@ -931,10 +956,9 @@ els.removeBackgroundButton.addEventListener('click', async () => {
     if (editingArtId !== artId || editorDraftUrl !== draftUrl || !els.frameEditorDialog.open) return;
     editorMask = { maskUrl, strokes: [] }; await buildCutoutPreview();
     const fitted = isFullCrop(cropDraft) && fitCornersToCutout();
-    setEditorTool('corners');
-    setCutoutStatus(fitted ? 'Background removed and corners fitted to the object. Fix any mistakes with the Keep and Erase brushes.' : 'Background removed. Fix any mistakes with the Keep and Erase brushes.');
+    setEditorTool('corners'); setCutoutStatus(fitted ? 'Done. The corners now hug the object.' : '');
   } catch (error) { setCutoutStatus(`Couldn’t remove the background. ${error.message}`); }
-  finally { clearInterval(poll); button.disabled = false; els.clearCutoutButton.disabled = false; }
+  finally { clearInterval(poll); busy(false); }
 });
 
 function isValidCropPolygon(points) {
