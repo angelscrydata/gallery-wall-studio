@@ -2,7 +2,7 @@ const $ = (selector) => document.querySelector(selector);
 const state = {
   wallUrl: null, naturalWidth: 0, naturalHeight: 0,
   scaleLine: null, pixelsPerUnit: null, unit: 'cm',
-  art: [], placed: [], selectedId: null, zoom: 1,
+  art: [], placed: [], selection: new Set(), zoom: 1,
   projectId: null, projectName: null, updatedAt: null, showSpacing: false,
   walls: [], activeWallId: null
 };
@@ -23,7 +23,7 @@ const els = {
   frameEditorDialog: $('#frameEditorDialog'), frameEditorForm: $('#frameEditorForm'), editorClose: $('#editorClose'),
   cropCanvas: $('#cropCanvas'), cropPolygon: $('#cropPolygon'), cropCorners: [...document.querySelectorAll('.crop-corner')], editorPreviewImage: $('#editorPreviewImage'),
   frameRotation: $('#frameRotation'), rotationOutput: $('#rotationOutput'), editorReset: $('#editorReset'),
-  rotateFrameButton: $('#rotateFrameButton'), wallTabs: $('#wallTabs'), wallTabList: $('#wallTabList'), addWallButton: $('#addWallButton')
+  rotateFrameButton: $('#rotateFrameButton'), selectionStatus: $('#selectionStatus'), wallTabs: $('#wallTabs'), wallTabList: $('#wallTabList'), addWallButton: $('#addWallButton')
 };
 
 function isHeic(file) {
@@ -207,7 +207,7 @@ async function showWall(wall) {
   const token = wallSwitchToken += 1;
   if (wall.wallUrl) await loadImage(wall.wallUrl);
   if (token !== wallSwitchToken) return false;
-  state.activeWallId = wall.id; state.selectedId = null; state.showSpacing = false;
+  state.activeWallId = wall.id; state.selection = new Set(); state.showSpacing = false;
   state.wallUrl = wall.wallUrl; state.naturalWidth = wall.naturalWidth; state.naturalHeight = wall.naturalHeight;
   state.unit = wall.unit || 'cm'; state.pixelsPerUnit = wall.pixelsPerUnit || null;
   els.knownLength.value = wall.knownLength || ''; els.unitSelect.value = state.unit; updateUnitLabels(); clearMeasurement();
@@ -487,7 +487,7 @@ function placeArt(artId, centerX, centerY) {
   const width = art.width * unitFactor * state.pixelsPerUnit * naturalToDisplay, height = art.height * unitFactor * state.pixelsPerUnit * naturalToDisplay;
   const placed = { id: crypto.randomUUID(), artId, x: centerX - width / 2, y: centerY - height / 2, width, height };
   placed.x = Math.max(0, Math.min(els.stage.clientWidth - width, placed.x)); placed.y = Math.max(0, Math.min(els.stage.clientHeight - height, placed.y));
-  state.placed.push(placed); state.selectedId = placed.id; renderPlaced(); queueSave();
+  state.placed.push(placed); state.selection = new Set([placed.id]); renderPlaced(); queueSave();
 }
 
 function renderPlaced() {
@@ -497,11 +497,11 @@ function renderPlaced() {
     const frame = document.createElement('div'); frame.className = 'placed-frame'; frame.dataset.id = item.id; frame.tabIndex = 0;
     const img = document.createElement('img'); img.src = art.url; img.alt = art.name; img.draggable = false; img.className = 'placed-frame-image'; img.style.cssText = frameImageStyleText(art);
     Object.assign(frame.style, { left: `${item.x}px`, top: `${item.y}px`, width: `${item.width}px`, height: `${item.height}px` });
-    frame.classList.toggle('selected', item.id === state.selectedId);
+    frame.classList.toggle('selected', state.selection.has(item.id));
     frame.append(img); frame.addEventListener('pointerdown', beginFrameDrag);
     els.placedArt.append(frame);
   });
-  renderSpacing();
+  updateSelectionStatus(); renderSpacing();
 }
 
 function updateSpacingToggle() {
@@ -796,43 +796,124 @@ function resizeOnOtherWalls(art) {
   });
 }
 
+// ---- Selection ----------------------------------------------------------
+// Frames can be selected one at a time (click), added or removed with Shift-click,
+// or picked up in a block by dragging a box across the wall.
+function selectedItems() { return state.placed.filter(item => state.selection.has(item.id)); }
+
+function setSelection(ids) {
+  state.selection = new Set(ids);
+  els.placedArt.querySelectorAll('.placed-frame').forEach(frame => frame.classList.toggle('selected', state.selection.has(frame.dataset.id)));
+  updateSelectionStatus();
+}
+
+function updateSelectionStatus() {
+  const count = selectedItems().length;
+  els.selectionStatus.hidden = count < 2; els.canvasHint.hidden = count >= 2;
+  if (count >= 2) els.selectionStatus.textContent = `${count} frames selected · drag to move together`;
+}
+
+// Moves a group by (dx, dy) on-screen pixels, stopping at the wall edges so the block keeps its shape.
+function clampGroupDelta(items, dx, dy) {
+  const left = Math.min(...items.map(item => item.x)), top = Math.min(...items.map(item => item.y));
+  const right = Math.max(...items.map(item => item.x + item.width)), bottom = Math.max(...items.map(item => item.y + item.height));
+  return { dx: clamp(dx, -left, Math.max(-left, els.stage.clientWidth - right)), dy: clamp(dy, -top, Math.max(-top, els.stage.clientHeight - bottom)) };
+}
+
+const isAdditive = event => event.shiftKey || event.metaKey || event.ctrlKey;
 let drag = null;
 function beginFrameDrag(event) {
-  const item = state.placed.find(p => p.id === event.currentTarget.dataset.id); if (!item) return;
-  setSelected(item.id); drag = { item, startX: event.clientX, startY: event.clientY, originX: item.x, originY: item.y };
-  event.currentTarget.setPointerCapture(event.pointerId); event.currentTarget.classList.add('dragging');
-  event.currentTarget.addEventListener('pointermove', moveFrame); event.currentTarget.addEventListener('pointerup', endFrame, { once: true });
+  if (event.button !== 0 || spaceHeld) return;
+  const frame = event.currentTarget, item = state.placed.find(p => p.id === frame.dataset.id); if (!item) return;
+  if (isAdditive(event)) {
+    const next = new Set(state.selection); if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+    setSelection(next); event.preventDefault(); return;
+  }
+  const wasInGroup = state.selection.has(item.id) && state.selection.size > 1;
+  if (!state.selection.has(item.id)) setSelection([item.id]);
+  const items = selectedItems();
+  drag = { item, items, wasInGroup, startX: event.clientX, startY: event.clientY, dx: 0, dy: 0,
+    elements: items.map(selected => els.placedArt.querySelector(`.placed-frame[data-id="${selected.id}"]`)).filter(Boolean) };
+  frame.setPointerCapture(event.pointerId); drag.elements.forEach(element => element.classList.add('dragging'));
+  frame.addEventListener('pointermove', moveFrame); frame.addEventListener('pointerup', endFrame, { once: true }); frame.addEventListener('pointercancel', endFrame, { once: true });
 }
 function moveFrame(event) {
-  if (!drag) return; const { item } = drag;
-  drag.nextX = Math.max(0, Math.min(els.stage.clientWidth - item.width, drag.originX + (event.clientX - drag.startX) / state.zoom));
-  drag.nextY = Math.max(0, Math.min(els.stage.clientHeight - item.height, drag.originY + (event.clientY - drag.startY) / state.zoom));
-  event.currentTarget.style.transform = `translate3d(${drag.nextX - drag.originX}px, ${drag.nextY - drag.originY}px, 0)`;
+  if (!drag) return;
+  Object.assign(drag, clampGroupDelta(drag.items, (event.clientX - drag.startX) / state.zoom, (event.clientY - drag.startY) / state.zoom));
+  drag.elements.forEach(element => { element.style.transform = `translate3d(${drag.dx}px, ${drag.dy}px, 0)`; });
 }
 function endFrame(event) {
   event.currentTarget.removeEventListener('pointermove', moveFrame);
-  const moved = drag && drag.nextX !== undefined && (drag.nextX !== drag.originX || drag.nextY !== drag.originY);
-  if (moved) { drag.item.x = drag.nextX; drag.item.y = drag.nextY; }
-  event.currentTarget.classList.remove('dragging'); drag = null;
+  if (!drag) return;
+  const moved = drag.dx !== 0 || drag.dy !== 0;
+  if (moved) drag.items.forEach(item => { item.x += drag.dx; item.y += drag.dy; });
+  drag.elements.forEach(element => element.classList.remove('dragging'));
+  // A plain click (no drag) on a frame inside a group narrows the selection to that frame.
+  if (!moved && drag.wasInGroup) setSelection([drag.item.id]);
+  drag = null;
   if (moved) { renderPlaced(); queueSave(); }
 }
 
-function setSelected(id) {
-  state.selectedId = id;
-  els.placedArt.querySelectorAll('.placed-frame').forEach(frame => frame.classList.toggle('selected', frame.dataset.id === id));
+// Drag across empty wall to draw a selection box. Shift-drag adds to the current selection.
+let marquee = null;
+els.stage.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || spaceHeld || !state.wallUrl || event.target.closest('.placed-frame') || els.measurementLayer.classList.contains('is-drawing')) return;
+  const rect = els.stage.getBoundingClientRect(), x = (event.clientX - rect.left) / state.zoom, y = (event.clientY - rect.top) / state.zoom;
+  const base = isAdditive(event) ? new Set(state.selection) : new Set();
+  if (!isAdditive(event)) setSelection([]);
+  const box = document.createElement('div'); box.className = 'selection-box'; box.style.borderWidth = `${1 / state.zoom}px`; box.hidden = true;
+  els.stage.append(box);
+  marquee = { x, y, base, box, rect, pointerId: event.pointerId };
+  els.stage.setPointerCapture(event.pointerId); event.preventDefault();
+});
+els.stage.addEventListener('pointermove', event => {
+  if (!marquee) return;
+  const x = clamp((event.clientX - marquee.rect.left) / state.zoom, 0, els.stage.clientWidth), y = clamp((event.clientY - marquee.rect.top) / state.zoom, 0, els.stage.clientHeight);
+  const left = Math.min(marquee.x, x), top = Math.min(marquee.y, y), width = Math.abs(x - marquee.x), height = Math.abs(y - marquee.y);
+  if (marquee.box.hidden && width * state.zoom < 3 && height * state.zoom < 3) return;
+  marquee.box.hidden = false; Object.assign(marquee.box.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+  const hits = state.placed.filter(item => item.x < left + width && item.x + item.width > left && item.y < top + height && item.y + item.height > top).map(item => item.id);
+  setSelection([...marquee.base, ...hits]);
+});
+function endMarquee(event) {
+  if (!marquee) return;
+  if (els.stage.hasPointerCapture?.(event.pointerId)) els.stage.releasePointerCapture(event.pointerId);
+  marquee.box.remove(); marquee = null;
 }
-// Clicking anywhere other than a placed frame clears the selection, so Delete/Backspace can't remove a frame you're no longer looking at.
-document.addEventListener('pointerdown', event => { if (state.selectedId && !event.target.closest?.('.placed-frame')) setSelected(null); });
+els.stage.addEventListener('pointerup', endMarquee); els.stage.addEventListener('pointercancel', endMarquee);
+
+// Clicking outside the wall clears the selection, so Delete/Backspace can't remove frames you're no longer looking at.
+// The toolbar above the wall (zoom, distances, tabs) keeps it.
+document.addEventListener('pointerdown', event => {
+  if (!state.selection.size || event.target.closest?.('.placed-frame, #stage, .workspace-tools')) return;
+  setSelection([]);
+});
+
+// Space + drag pans when zoomed, like most design tools.
+let spaceHeld = false;
+const typingTarget = element => element && (['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(element.tagName) || element.isContentEditable);
+document.addEventListener('keydown', event => {
+  if (event.code !== 'Space' || typingTarget(document.activeElement) || document.querySelector('dialog[open]')) return;
+  event.preventDefault(); if (!spaceHeld) { spaceHeld = true; els.stageWrap.classList.add('space-pan'); }
+});
+document.addEventListener('keyup', event => { if (event.code === 'Space') { spaceHeld = false; els.stageWrap.classList.remove('space-pan'); } });
+window.addEventListener('blur', () => { spaceHeld = false; els.stageWrap.classList.remove('space-pan'); });
 
 document.addEventListener('keydown', event => {
-  if (!state.selectedId || document.querySelector('dialog[open]')) return;
+  if (document.querySelector('dialog[open]') || !state.wallUrl) return;
   const active = document.activeElement;
   if (active && active !== document.body && !active.classList.contains('placed-frame')) return;
-  const item = state.placed.find(p => p.id === state.selectedId); if (!item) return;
-  if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); state.placed = state.placed.filter(p => p.id !== item.id); state.selectedId = null; renderPlaced(); queueSave(); return; }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') { event.preventDefault(); setSelection(state.placed.map(item => item.id)); return; }
+  const items = selectedItems(); if (!items.length) return;
+  if (event.key === 'Escape') { setSelection([]); return; }
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    event.preventDefault(); state.placed = state.placed.filter(item => !state.selection.has(item.id)); state.selection = new Set(); renderPlaced(); queueSave(); return;
+  }
   const step = event.shiftKey ? 10 : 1;
-  if (event.key === 'ArrowLeft') item.x -= step; else if (event.key === 'ArrowRight') item.x += step; else if (event.key === 'ArrowUp') item.y -= step; else if (event.key === 'ArrowDown') item.y += step; else return;
-  event.preventDefault(); item.x = Math.max(0, Math.min(els.stage.clientWidth - item.width, item.x)); item.y = Math.max(0, Math.min(els.stage.clientHeight - item.height, item.y)); renderPlaced(); queueSave();
+  const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key]; if (!moves) return;
+  event.preventDefault();
+  const { dx, dy } = clampGroupDelta(items, moves[0], moves[1]);
+  items.forEach(item => { item.x += dx; item.y += dy; }); renderPlaced(); queueSave();
 });
 
 function setZoom(value) {
@@ -844,7 +925,9 @@ els.zoomIn.addEventListener('click', () => setZoom(state.zoom + .25)); els.zoomO
 
 let panDrag = null;
 function canBeginPan(event) {
-  return state.zoom > 1 && event.button === 0 && !event.target.closest('.placed-frame') && !els.measurementLayer.classList.contains('is-drawing');
+  if (state.zoom <= 1 || els.measurementLayer.classList.contains('is-drawing')) return false;
+  if (event.button === 1 || (event.button === 0 && spaceHeld)) return true;
+  return event.button === 0 && !event.target.closest('#stage');
 }
 function beginPan(event) {
   if (panDrag || !canBeginPan(event)) return;
