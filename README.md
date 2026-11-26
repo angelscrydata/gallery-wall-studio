@@ -51,7 +51,9 @@ PORT=3000 npm run dev
 
 ## Saved walls
 
-Wall projects are saved automatically to `.gallery-wall-data/projects.json` in the local repository. The **Previous walls** tab lets you reopen projects or use the thumbnail’s ••• menu to rename and delete them. Frames can be removed from the right rail with their × button; this also removes their placed copies.
+Wall projects are saved automatically to `.gallery-wall-data/projects/`, one JSON file per wall, in the local repository. Older `projects.json` stores are split into this folder automatically on the next launch. The **Previous walls** tab lets you reopen projects or use the thumbnail’s ••• menu to rename and delete them. Frames can be removed from the right rail with their × button; this also removes their placed copies.
+
+Deleted walls are moved to `.gallery-wall-data/backups/` and their ids are recorded in `.gallery-wall-data/deleted.json`, so a stale copy in another browser profile is removed rather than restored. A delete made while the server is unreachable is retried on the next launch.
 
 The data directory is intentionally gitignored because it contains the uploaded photos. Saved walls are available from any browser profile or port running this repository. On every launch, the app reconciles that profile's browser backup with the shared repo-backed store, so older browser-only walls are copied over automatically.
 
@@ -71,5 +73,5 @@ scripts/
 docs/
   gallery-wall-studio.png  README screenshot
 package.json    npm scripts
-.gallery-wall-data/  Local saved walls (created automatically, gitignored)
+.gallery-wall-data/  Local saved walls, deleted-wall backups (created automatically, gitignored)
 ```

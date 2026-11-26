@@ -75,14 +75,33 @@ async function putProject(project) {
   catch (error) { console.warn('Repo-backed storage is unavailable; saved in this browser only.', error); }
 }
 
+const pendingDeletesKey = 'gallery-wall-pending-deletes';
+function readPendingDeletes() { try { return JSON.parse(localStorage.getItem(pendingDeletesKey)) || []; } catch { return []; } }
+function writePendingDeletes(ids) { try { localStorage.setItem(pendingDeletesKey, JSON.stringify(ids)); } catch {} }
+
+async function sendServerDelete(id) {
+  await projectApi(`/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  writePendingDeletes(readPendingDeletes().filter(candidate => candidate !== id));
+}
+
 async function getAllProjects() {
   let localProjects = [];
   try { localProjects = await getLocalProjects(); } catch (error) { console.warn('Could not read browser project backup.', error); }
-  let serverProjects;
-  try { serverProjects = await projectApi(); }
+  const pendingDeletes = readPendingDeletes();
+  localProjects = localProjects.filter(project => !pendingDeletes.includes(project.id));
+  let serverProjects, deletedIds;
+  try {
+    for (const id of pendingDeletes) await sendServerDelete(id);
+    [serverProjects, deletedIds] = await Promise.all([projectApi(), projectApi('/deleted')]);
+  }
   catch (error) { console.warn('Repo-backed storage is unavailable; using browser projects.', error); return localProjects; }
 
-  const projects = new Map(serverProjects.map(project => [project.id, project]));
+  // Walls deleted in any browser profile stay deleted everywhere instead of being re-uploaded.
+  const deleted = new Set(deletedIds);
+  for (const localProject of localProjects.filter(project => deleted.has(project.id))) await deleteLocalProject(localProject.id).catch(() => {});
+  localProjects = localProjects.filter(project => !deleted.has(project.id));
+
+  const projects = new Map(serverProjects.filter(project => !deleted.has(project.id)).map(project => [project.id, project]));
   for (const localProject of localProjects) {
     const serverProject = projects.get(localProject.id);
     if (!serverProject || (localProject.updatedAt || 0) > (serverProject.updatedAt || 0)) {
@@ -100,8 +119,9 @@ async function getAllProjects() {
 
 async function deleteProject(id) {
   await deleteLocalProject(id);
-  try { await projectApi(`/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
-  catch (error) { console.warn('Could not delete the repo-backed project.', error); }
+  writePendingDeletes([...new Set([...readPendingDeletes(), id])]);
+  try { await sendServerDelete(id); }
+  catch (error) { console.warn('Could not reach repo-backed storage; the delete will sync next time.', error); }
 }
 let saveTimer;
 function queueSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveCurrentProject, 250); }
@@ -371,8 +391,8 @@ function renderPlaced() {
     const frame = document.createElement('div'); frame.className = 'placed-frame'; frame.dataset.id = item.id; frame.tabIndex = 0;
     const img = document.createElement('img'); img.src = art.url; img.alt = art.name; img.draggable = false; img.className = 'placed-frame-image'; img.style.cssText = frameImageStyleText(art);
     Object.assign(frame.style, { left: `${item.x}px`, top: `${item.y}px`, width: `${item.width}px`, height: `${item.height}px` });
+    frame.classList.toggle('selected', item.id === state.selectedId);
     frame.append(img); frame.addEventListener('pointerdown', beginFrameDrag);
-    frame.addEventListener('click', () => { state.selectedId = item.id; });
     els.placedArt.append(frame);
   });
   renderSpacing();
@@ -658,8 +678,8 @@ function resizePlacedCopies(art) {
 let drag = null;
 function beginFrameDrag(event) {
   const item = state.placed.find(p => p.id === event.currentTarget.dataset.id); if (!item) return;
-  state.selectedId = item.id; drag = { item, startX: event.clientX, startY: event.clientY, originX: item.x, originY: item.y };
-  event.currentTarget.setPointerCapture(event.pointerId); event.currentTarget.classList.add('dragging', 'selected');
+  setSelected(item.id); drag = { item, startX: event.clientX, startY: event.clientY, originX: item.x, originY: item.y };
+  event.currentTarget.setPointerCapture(event.pointerId); event.currentTarget.classList.add('dragging');
   event.currentTarget.addEventListener('pointermove', moveFrame); event.currentTarget.addEventListener('pointerup', endFrame, { once: true });
 }
 function moveFrame(event) {
@@ -676,10 +696,19 @@ function endFrame(event) {
   if (moved) { renderPlaced(); queueSave(); }
 }
 
+function setSelected(id) {
+  state.selectedId = id;
+  els.placedArt.querySelectorAll('.placed-frame').forEach(frame => frame.classList.toggle('selected', frame.dataset.id === id));
+}
+// Clicking anywhere other than a placed frame clears the selection, so Delete/Backspace can't remove a frame you're no longer looking at.
+document.addEventListener('pointerdown', event => { if (state.selectedId && !event.target.closest?.('.placed-frame')) setSelected(null); });
+
 document.addEventListener('keydown', event => {
-  if (!state.selectedId || ['INPUT','SELECT'].includes(document.activeElement.tagName)) return;
+  if (!state.selectedId || document.querySelector('dialog[open]')) return;
+  const active = document.activeElement;
+  if (active && active !== document.body && !active.classList.contains('placed-frame')) return;
   const item = state.placed.find(p => p.id === state.selectedId); if (!item) return;
-  if (event.key === 'Delete' || event.key === 'Backspace') { state.placed = state.placed.filter(p => p.id !== item.id); state.selectedId = null; renderPlaced(); queueSave(); return; }
+  if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); state.placed = state.placed.filter(p => p.id !== item.id); state.selectedId = null; renderPlaced(); queueSave(); return; }
   const step = event.shiftKey ? 10 : 1;
   if (event.key === 'ArrowLeft') item.x -= step; else if (event.key === 'ArrowRight') item.x += step; else if (event.key === 'ArrowUp') item.y -= step; else if (event.key === 'ArrowDown') item.y += step; else return;
   event.preventDefault(); item.x = Math.max(0, Math.min(els.stage.clientWidth - item.width, item.x)); item.y = Math.max(0, Math.min(els.stage.clientHeight - item.height, item.y)); renderPlaced(); queueSave();
@@ -714,19 +743,31 @@ els.stageWrap.addEventListener('pointerdown', beginPan); document.addEventListen
 els.stageWrap.addEventListener('mousedown', beginPan); document.addEventListener('mousemove', movePan); document.addEventListener('mouseup', endPan);
 
 els.exportButton.addEventListener('click', async () => {
+  els.exportButton.disabled = true; els.exportButton.textContent = 'Saving…';
+  try { await exportWall(); }
+  catch (error) { window.alert(`Could not save the image. ${error.message}`); }
+  finally { els.exportButton.disabled = false; els.exportButton.textContent = 'Save image'; }
+});
+async function exportWall() {
   const canvas = document.createElement('canvas'); canvas.width = state.naturalWidth; canvas.height = state.naturalHeight;
-  const ctx = canvas.getContext('2d'); const wall = await imageFromUrl(state.wallUrl); ctx.drawImage(wall, 0, 0, canvas.width, canvas.height);
+  const ctx = canvas.getContext('2d'); const wall = await imageFromUrl(state.wallUrl, 'The wall photo'); ctx.drawImage(wall, 0, 0, canvas.width, canvas.height);
   const ratio = state.naturalWidth / els.stage.clientWidth;
   for (const item of state.placed) {
-    const art = state.art.find(a => a.id === item.artId), img = await imageFromUrl(art.url);
+    const art = state.art.find(a => a.id === item.artId); if (!art) continue;
+    const img = await imageFromUrl(art.url, art.name);
     const x = item.x * ratio, y = item.y * ratio, width = item.width * ratio, height = item.height * ratio;
     ctx.save(); ctx.beginPath(); ctx.rect(x, y, width, height); ctx.clip();
     ensureCrop(art); ctx.translate(x + width / 2, y + height / 2); ctx.rotate((art.rotation || 0) * Math.PI / 180);
     ctx.drawImage(img, art.cropLeft * img.naturalWidth, art.cropTop * img.naturalHeight, art.cropWidth * img.naturalWidth, art.cropHeight * img.naturalHeight, -width / 2, -height / 2, width, height); ctx.restore();
   }
   const link = document.createElement('a'); link.download = 'gallery-wall-plan.png'; link.href = canvas.toDataURL('image/png'); link.click();
-});
-function imageFromUrl(url) { return new Promise(resolve => { const img = new Image(); img.onload = () => resolve(img); img.src = url; }); }
+}
+function imageFromUrl(url, label = 'an image') {
+  return new Promise((resolve, reject) => {
+    const img = new Image(); img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`${label === 'an image' ? 'An image' : `“${label}”`} could not be loaded.`)); img.src = url;
+  });
+}
 
 els.resetButton.addEventListener('click', () => els.confirmDialog.showModal());
 els.confirmDialog.addEventListener('close', async () => {
@@ -760,5 +801,17 @@ function setProjectView(view) {
 }
 setProjectView(localStorage.getItem('gallery-wall-project-view') === 'list' ? 'list' : 'grid');
 getAllProjects().catch(error => console.warn('Could not sync saved walls on startup.', error));
-window.addEventListener('resize', () => { if (state.wallUrl && !state.placed.length) fitStage(); });
+let resizeTimer;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(refitStage, 120); });
+// Placed frames and the scale line are stored in on-screen pixels, so scale them with the stage to keep them in the same spot on the wall.
+function refitStage() {
+  if (!state.wallUrl || els.stage.hidden) return;
+  const oldWidth = els.stage.clientWidth, oldHeight = els.stage.clientHeight; fitStage();
+  const scaleX = els.stage.clientWidth / oldWidth, scaleY = els.stage.clientHeight / oldHeight;
+  if (!oldWidth || !oldHeight || (scaleX === 1 && scaleY === 1)) return;
+  state.placed.forEach(item => { item.x *= scaleX; item.y *= scaleY; item.width *= scaleX; item.height *= scaleY; });
+  if (state.scaleLine) { state.scaleLine.x1 *= scaleX; state.scaleLine.x2 *= scaleX; state.scaleLine.y1 *= scaleY; state.scaleLine.y2 *= scaleY; }
+  if (state.scaleLine && els.measurementLine.getAttribute('visibility') === 'visible') setLine(state.scaleLine);
+  renderPlaced();
+}
 function escapeHtml(value) { const div = document.createElement('div'); div.textContent = value; return div.innerHTML; }
