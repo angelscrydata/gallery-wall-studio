@@ -134,9 +134,17 @@ input[type="number"], select { width: 100%; border: 1px solid var(--line); backg
 .wall-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wall-tab-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; border: 1px solid currentColor; opacity: .55; }
 .wall-tab-dot.is-set { background: currentColor; opacity: .8; }
-.wall-tab-close { flex: none; width: 22px; height: 22px; margin-right: 6px; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; font-size: .95rem; line-height: 1; opacity: 0; }
-.wall-tab:hover .wall-tab-close, .wall-tab.is-active .wall-tab-close, .wall-tab-close:focus-visible { opacity: .6; }
-.wall-tab-close:hover { opacity: 1; background: rgba(23,23,21,.08); }
+.wall-tab-icon { flex: none; width: 22px; height: 22px; display: none; place-items: center; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; font-size: .95rem; line-height: 1; opacity: .6; padding: 0; }
+.wall-tab-icon:last-child { margin-right: 6px; }
+.wall-tab-icon svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
+.wall-tab.is-active .wall-tab-icon, .wall-tab:hover .wall-tab-icon, .wall-tab-icon:focus-visible { display: grid; }
+.wall-tab-icon:hover { opacity: 1; background: rgba(23,23,21,.08); }
+.wall-tab.is-renaming .wall-tab-icon { display: none; }
+.wall-tab-menu { position: fixed; z-index: 50; min-width: 150px; padding: 4px; background: var(--white); border: 1px solid var(--line); box-shadow: 0 10px 28px rgba(23,23,21,.14); display: grid; }
+.wall-tab-menu[hidden] { display: none; }
+.wall-tab-menu button { border: 0; background: transparent; padding: 8px 10px; text-align: left; font: inherit; font-size: .78rem; color: var(--ink); cursor: pointer; }
+.wall-tab-menu button:hover:not(:disabled), .wall-tab-menu button:focus-visible { background: rgba(23,23,21,.06); outline: 0; }
+.wall-tab-menu button:disabled { color: var(--muted); opacity: .5; cursor: default; }
 .wall-tab-input { flex: 1; min-width: 0; margin: 0 8px 0 10px; height: 24px; border: 1px solid var(--line); background: var(--white); padding: 0 6px; font: inherit; font-size: .74rem; color: var(--ink); }
 .wall-tab-add { flex: none; width: 30px; height: 30px; margin: 0 0 3px 4px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; font-size: 1.15rem; line-height: 1; }
 .wall-tab-add:hover { background: var(--panel); color: var(--ink); }

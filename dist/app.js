@@ -263,35 +263,74 @@ async function removeWall(wallId) {
   queueSave();
 }
 
-function renameWall(wallId, tab) {
+// Rename a wall in place: the tab's button is swapped for a text field (never nested inside the
+// button, which Safari and Firefox won't let you type into). Enter or clicking away saves; Esc cancels.
+function renameWall(wallId) {
   const wall = state.walls.find(candidate => candidate.id === wallId); if (!wall) return;
-  const label = tab.querySelector('.wall-tab-name'), input = document.createElement('input');
+  closeWallTabMenu();
+  const tab = els.wallTabList.querySelector(`.wall-tab[data-wall-id="${wallId}"]`); if (!tab || tab.classList.contains('is-renaming')) return;
+  const input = document.createElement('input');
   input.className = 'wall-tab-input'; input.value = wall.name; input.maxLength = 40; input.setAttribute('aria-label', 'Wall name');
-  label.replaceWith(input); input.focus(); input.select();
+  tab.classList.add('is-renaming'); tab.querySelector('.wall-tab-select').replaceWith(input); input.focus(); input.select();
   let done = false;
   const finish = save => {
     if (done) return; done = true;
-    const name = input.value.trim(); if (save && name) { wall.name = name; queueSave(); }
+    const name = input.value.trim(); if (save && name && name !== wall.name) { wall.name = name; queueSave(); }
     renderWallTabs(); if (!state.wallUrl && wall.id === state.activeWallId) els.canvasHint.textContent = `Choose a photo for ${wall.name}`;
+    els.wallTabList.querySelector(`.wall-tab[data-wall-id="${wallId}"] .wall-tab-select`)?.focus({ preventScroll: true });
   };
-  input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); finish(true); } else if (event.key === 'Escape') finish(false); });
+  input.addEventListener('keydown', event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); finish(true); } else if (event.key === 'Escape') { event.preventDefault(); finish(false); } });
   input.addEventListener('blur', () => finish(true));
 }
 
+const wallTabMenu = document.createElement('div');
+wallTabMenu.className = 'wall-tab-menu'; wallTabMenu.hidden = true; wallTabMenu.setAttribute('role', 'menu');
+wallTabMenu.innerHTML = '<button type="button" role="menuitem" data-action="rename">Rename wall</button><button type="button" role="menuitem" data-action="delete">Delete wall</button>';
+document.body.append(wallTabMenu);
+function openWallTabMenu(wallId, x, y) {
+  wallTabMenu.dataset.wallId = wallId; wallTabMenu.querySelector('[data-action="delete"]').disabled = state.walls.length < 2;
+  wallTabMenu.hidden = false;
+  const { width, height } = wallTabMenu.getBoundingClientRect();
+  Object.assign(wallTabMenu.style, { left: `${Math.min(x, innerWidth - width - 8)}px`, top: `${Math.min(y, innerHeight - height - 8)}px` });
+  wallTabMenu.querySelector('button').focus();
+}
+function closeWallTabMenu() { wallTabMenu.hidden = true; }
+wallTabMenu.addEventListener('click', event => {
+  const action = event.target.closest('button')?.dataset.action, wallId = wallTabMenu.dataset.wallId; closeWallTabMenu();
+  if (action === 'rename') renameWall(wallId); else if (action === 'delete') removeWall(wallId);
+});
+document.addEventListener('pointerdown', event => { if (!wallTabMenu.hidden && !wallTabMenu.contains(event.target)) closeWallTabMenu(); });
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && !wallTabMenu.hidden) closeWallTabMenu(); });
+window.addEventListener('resize', closeWallTabMenu); window.addEventListener('blur', closeWallTabMenu);
+
+const pencilIcon = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M13.5 3.5l3 3L7 16l-3.5.5L4 13z"/></svg>';
 function renderWallTabs() {
   els.wallTabs.hidden = !state.projectId;
   els.wallTabList.replaceChildren();
   state.walls.forEach(wall => {
-    const active = wall.id === state.activeWallId;
-    const tab = document.createElement('div'); tab.className = `wall-tab${active ? ' is-active' : ''}`;
-    tab.innerHTML = `<button class="wall-tab-select" type="button" role="tab" aria-selected="${active}" title="${escapeHtml(wall.name)} · double-click to rename"><span class="wall-tab-dot${wall.pixelsPerUnit ? ' is-set' : ''}" aria-hidden="true"></span><span class="wall-tab-name">${escapeHtml(wall.name)}</span></button>${state.walls.length > 1 ? `<button class="wall-tab-close" type="button" aria-label="Delete ${escapeHtml(wall.name)}">×</button>` : ''}`;
+    const active = wall.id === state.activeWallId, name = escapeHtml(wall.name);
+    const tab = document.createElement('div'); tab.className = `wall-tab${active ? ' is-active' : ''}`; tab.dataset.wallId = wall.id;
+    tab.innerHTML = `<button class="wall-tab-select" type="button" role="tab" aria-selected="${active}" title="${name} · double-click or right-click to rename"><span class="wall-tab-dot${wall.pixelsPerUnit ? ' is-set' : ''}" aria-hidden="true"></span><span class="wall-tab-name">${name}</span></button>`
+      + `<button class="wall-tab-icon wall-tab-rename" type="button" aria-label="Rename ${name}" title="Rename">${pencilIcon}</button>`
+      + (state.walls.length > 1 ? `<button class="wall-tab-icon wall-tab-close" type="button" aria-label="Delete ${name}" title="Delete wall">×</button>` : '');
     const select = tab.querySelector('.wall-tab-select');
     select.addEventListener('click', () => switchWall(wall.id));
-    select.addEventListener('dblclick', () => renameWall(wall.id, tab));
+    select.addEventListener('keydown', event => { if (event.key === 'F2') { event.preventDefault(); renameWall(wall.id); } });
+    tab.querySelector('.wall-tab-rename').addEventListener('click', () => renameWall(wall.id));
     tab.querySelector('.wall-tab-close')?.addEventListener('click', () => removeWall(wall.id));
     els.wallTabList.append(tab);
   });
 }
+// Double-click a tab to rename it. Listening on the list (not each tab) survives the re-render
+// that the first click on an inactive tab causes.
+els.wallTabList.addEventListener('dblclick', event => {
+  const tab = event.target.closest('.wall-tab'); if (!tab || event.target.closest('.wall-tab-icon, .wall-tab-input')) return;
+  renameWall(tab.dataset.wallId);
+});
+els.wallTabList.addEventListener('contextmenu', event => {
+  const tab = event.target.closest('.wall-tab'); if (!tab || event.target.closest('.wall-tab-input')) return;
+  event.preventDefault(); openWallTabMenu(tab.dataset.wallId, event.clientX, event.clientY);
+});
 
 async function openSavedProject(savedProject) {
   const project = normalizeProject(savedProject);
