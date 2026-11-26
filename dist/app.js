@@ -42,103 +42,92 @@ async function readFile(file) {
   });
 }
 
-const dbPromise = new Promise((resolve, reject) => {
-  const request = indexedDB.open('gallery-wall-studio', 1);
-  request.onupgradeneeded = () => request.result.createObjectStore('projects', { keyPath: 'id' });
-  request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
-});
-
-async function projectStore(mode, action) {
-  const db = await dbPromise;
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction('projects', mode); const store = transaction.objectStore('projects');
-    const request = action(store); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
-  });
-}
-
-const putLocalProject = project => projectStore('readwrite', store => store.put(project));
-const getLocalProjects = () => projectStore('readonly', store => store.getAll());
-const deleteLocalProject = id => projectStore('readwrite', store => store.delete(id));
-
+// ---- Storage -----------------------------------------------------------------
+// Projects are saved only in the repo (.gallery-wall-data/), through the local dev server.
+// Nothing is kept in the browser. Older versions also stored copies in this browser's IndexedDB;
+// on load those are moved into the repo, and each browser copy is removed only after the repo
+// confirms it is saved.
 async function projectApi(path = '', options = {}) {
-  const response = await fetch(`/api/projects${path}`, options);
+  let response;
+  try { response = await fetch(`/api/projects${path}`, options); }
+  catch { throw new Error('The local server isn’t running. Start it with npm run dev.'); }
   if (!response.ok) throw new Error(await response.text() || `Project storage failed (${response.status}).`);
   return response.json();
 }
 
-async function putServerProject(project) {
-  return projectApi('', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(project) });
-}
-
 async function putProject(project) {
-  await putLocalProject(project);
-  try { await putServerProject(project); hideSaveWarning(); }
-  catch (error) { console.warn('Repo-backed storage is unavailable; saved in this browser only.', error); showSaveWarning(error); }
-}
-
-// Saving to the repo can fail silently otherwise (server stopped, project too large), leaving work in this browser only.
-const saveWarning = document.createElement('div');
-saveWarning.className = 'save-warning'; saveWarning.hidden = true; saveWarning.setAttribute('role', 'status');
-document.body.append(saveWarning);
-function showSaveWarning(error) {
-  const reason = /too large/i.test(error?.message || '') ? error.message : 'The local server could not be reached.';
-  saveWarning.textContent = `Saved in this browser only, not to the repo. ${reason}`; saveWarning.hidden = false;
-}
-function hideSaveWarning() { saveWarning.hidden = true; }
-
-const pendingDeletesKey = 'gallery-wall-pending-deletes';
-function readPendingDeletes() { try { return JSON.parse(localStorage.getItem(pendingDeletesKey)) || []; } catch { return []; } }
-function writePendingDeletes(ids) { try { localStorage.setItem(pendingDeletesKey, JSON.stringify(ids)); } catch {} }
-
-async function sendServerDelete(id) {
-  await projectApi(`/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  writePendingDeletes(readPendingDeletes().filter(candidate => candidate !== id));
+  await projectApi('', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(project) });
 }
 
 async function getAllProjects() {
-  let localProjects = [];
-  try { localProjects = await getLocalProjects(); } catch (error) { console.warn('Could not read browser project backup.', error); }
-  const pendingDeletes = readPendingDeletes();
-  localProjects = localProjects.filter(project => !pendingDeletes.includes(project.id));
-  let serverProjects, deletedIds;
-  try {
-    for (const id of pendingDeletes) await sendServerDelete(id);
-    [serverProjects, deletedIds] = await Promise.all([projectApi(), projectApi('/deleted')]);
-  }
-  catch (error) { console.warn('Repo-backed storage is unavailable; using browser projects.', error); return localProjects; }
-
-  // Walls deleted in any browser profile stay deleted everywhere instead of being re-uploaded.
-  const deleted = new Set(deletedIds);
-  for (const localProject of localProjects.filter(project => deleted.has(project.id))) await deleteLocalProject(localProject.id).catch(() => {});
-  localProjects = localProjects.filter(project => !deleted.has(project.id));
-
-  const projects = new Map(serverProjects.filter(project => !deleted.has(project.id)).map(project => [project.id, project]));
-  for (const localProject of localProjects) {
-    const serverProject = projects.get(localProject.id);
-    if (!serverProject || (localProject.updatedAt || 0) > (serverProject.updatedAt || 0)) {
-      projects.set(localProject.id, localProject);
-      try { await putServerProject(localProject); }
-      catch (error) { console.warn('Could not sync a browser project to shared storage.', error); }
-    }
-  }
-  for (const project of projects.values()) {
-    const localProject = localProjects.find(candidate => candidate.id === project.id);
-    if (!localProject || (project.updatedAt || 0) > (localProject.updatedAt || 0)) await putLocalProject(project);
-  }
-  return [...projects.values()];
+  const deleted = new Set(await projectApi('/deleted'));
+  return (await projectApi()).filter(project => !deleted.has(project.id));
 }
 
-async function deleteProject(id) {
-  await deleteLocalProject(id);
-  writePendingDeletes([...new Set([...readPendingDeletes(), id])]);
-  try { await sendServerDelete(id); }
-  catch (error) { console.warn('Could not reach repo-backed storage; the delete will sync next time.', error); }
+async function deleteProject(id) { await projectApi(`/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+
+// Opens the old browser store only if it already exists (never creates it).
+function openLegacyBrowserStore() {
+  return new Promise(resolve => {
+    let request;
+    try { request = indexedDB.open('gallery-wall-studio'); } catch { resolve(null); return; }
+    request.onupgradeneeded = () => { request.transaction.abort(); };
+    request.onsuccess = () => { const db = request.result; if (db.objectStoreNames.contains('projects')) resolve(db); else { db.close(); resolve(null); } };
+    request.onerror = () => resolve(null);
+  });
 }
+function legacyStoreRequest(db, mode, action) {
+  return new Promise((resolve, reject) => {
+    const request = action(db.transaction('projects', mode).objectStore('projects'));
+    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+  });
+}
+
+async function moveBrowserProjectsToRepo() {
+  // Deletes queued by the old version while the server was down.
+  let pendingDeletes = [];
+  try { pendingDeletes = JSON.parse(localStorage.getItem('gallery-wall-pending-deletes')) || []; } catch {}
+  for (const id of pendingDeletes) await deleteProject(id);
+  try { localStorage.removeItem('gallery-wall-pending-deletes'); } catch {}
+
+  const db = await openLegacyBrowserStore(); if (!db) return;
+  const browserProjects = await legacyStoreRequest(db, 'readonly', store => store.getAll());
+  if (!browserProjects.length) { db.close(); indexedDB.deleteDatabase('gallery-wall-studio'); return; }
+  const [repoProjects, deletedIds] = await Promise.all([projectApi(), projectApi('/deleted')]);
+  const repoById = new Map(repoProjects.map(project => [project.id, project])), deleted = new Set(deletedIds);
+  let kept = 0;
+  for (const project of browserProjects) {
+    const inRepo = repoById.get(project.id);
+    try {
+      if (!deleted.has(project.id) && (!inRepo || (project.updatedAt || 0) > (inRepo.updatedAt || 0))) await putProject(project);
+      await legacyStoreRequest(db, 'readwrite', store => store.delete(project.id));
+    } catch (error) { kept += 1; console.warn(`Could not move “${project.name}” from this browser into the repo.`, error); showSaveWarning(error, `Couldn’t move “${project.name}” from this browser into the repo; it’s still in the browser and will be retried next time.`); }
+  }
+  db.close();
+  if (!kept) indexedDB.deleteDatabase('gallery-wall-studio');
+}
+
+// ---- Save status ----------------------------------------------------------------
+// Since nothing is kept in the browser, a failed save is shown on screen, retried, and guarded on page exit.
+const saveWarning = document.createElement('div');
+saveWarning.className = 'save-warning'; saveWarning.hidden = true; saveWarning.setAttribute('role', 'alert');
+document.body.append(saveWarning);
+function showSaveWarning(error, message) {
+  saveWarning.textContent = message || `Not saved to the repo yet: ${error?.message || 'unknown error'} Retrying…`; saveWarning.hidden = false;
+}
+function hideSaveWarning() { saveWarning.hidden = true; }
+const saveVersions = { pending: 0, saved: 0 };
+let retryTimer;
+window.addEventListener('beforeunload', event => {
+  if (saveVersions.saved < saveVersions.pending) { event.preventDefault(); event.returnValue = ''; }
+});
+
 let saveTimer;
 // Every edit calls queueSave, which also records an undo step (unless `record: false`).
 // `coalesce` merges rapid repeats of the same kind of edit (arrow nudges, typing a length) into one step.
 function queueSave({ record = true, coalesce = null } = {}) {
   if (record) recordHistory(coalesce);
+  if (state.projectId) saveVersions.pending += 1;
   clearTimeout(saveTimer); saveTimer = setTimeout(saveCurrentProject, 250);
 }
 
@@ -190,8 +179,15 @@ async function saveCurrentProject() {
     art: state.art, walls: state.walls.map(wall => ({ ...wall })), activeWallId: state.activeWallId
   };
   state.updatedAt = project.updatedAt;
-  try { await putProject(project); if (!els.historyPanel.hidden) renderProjects(); return true; }
-  catch (error) { console.warn('Could not save project', error); return false; }
+  const version = saveVersions.pending; clearTimeout(retryTimer);
+  try {
+    await putProject(project); saveVersions.saved = Math.max(saveVersions.saved, version); hideSaveWarning();
+    if (!els.historyPanel.hidden) renderProjects(); return true;
+  } catch (error) {
+    console.warn('Could not save project', error); showSaveWarning(error);
+    retryTimer = setTimeout(() => { if (saveVersions.saved < saveVersions.pending) saveCurrentProject(); }, 5000);
+    return false;
+  }
 }
 
 function loadImage(url) {
@@ -362,7 +358,8 @@ function switchSidebarTab(tab) {
 
 async function renderProjects() {
   let projects = [];
-  try { projects = (await getAllProjects()).sort((a, b) => b.updatedAt - a.updatedAt); } catch (error) { console.warn('Could not load projects', error); }
+  try { projects = (await getAllProjects()).sort((a, b) => b.updatedAt - a.updatedAt); }
+  catch (error) { els.projectLibrary.innerHTML = `<p class="empty-projects">Couldn’t load projects. ${escapeHtml(error.message)}</p>`; return; }
   if (!projects.length) { els.projectLibrary.innerHTML = '<p class="empty-projects">Projects you work on will appear here automatically.</p>'; return; }
   els.projectLibrary.innerHTML = '';
   projects.forEach(project => {
@@ -379,7 +376,7 @@ async function renderProjects() {
     card.querySelector('.project-rename').onclick = () => { menu.hidden = true; showRenameForm(card, project); };
     card.querySelector('.project-delete').onclick = async () => {
       if (!window.confirm(`Delete “${project.name}”? This cannot be undone.`)) return;
-      await deleteProject(project.id);
+      try { await deleteProject(project.id); } catch (error) { window.alert(`Couldn’t delete “${project.name}”. ${error.message}`); return; }
       if (state.projectId === project.id) { clearTimeout(saveTimer); state.projectId = null; location.reload(); return; }
       renderProjects();
     };
@@ -394,7 +391,8 @@ function showRenameForm(card, project) {
   const input = form.querySelector('input'); input.value = project.name; card.append(form); input.focus(); input.select();
   form.onsubmit = async event => {
     event.preventDefault(); const name = input.value.trim(); if (!name) return;
-    project.name = name; project.updatedAt = Date.now(); await putProject(project);
+    const previousName = project.name; project.name = name; project.updatedAt = Date.now();
+    try { await putProject(project); } catch (error) { project.name = previousName; window.alert(`Couldn’t rename the project. ${error.message}`); return; }
     if (state.projectId === project.id) { state.projectName = name; state.updatedAt = project.updatedAt; }
     renderProjects();
   };
@@ -1150,7 +1148,7 @@ function setProjectView(view) {
   localStorage.setItem('gallery-wall-project-view', view);
 }
 setProjectView(localStorage.getItem('gallery-wall-project-view') === 'list' ? 'list' : 'grid');
-getAllProjects().catch(error => console.warn('Could not sync saved walls on startup.', error));
+moveBrowserProjectsToRepo().catch(error => console.warn('Could not move browser projects into the repo.', error));
 let resizeTimer;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(refitStage, 120); });
 // Placed frames and the scale line are stored in on-screen pixels, so scale them with the stage to keep them in the same spot on the wall.

@@ -58,9 +58,11 @@ PORT=3000 npm run dev
 
 Projects are saved automatically to `.gallery-wall-data/projects/`, one JSON file per project (holding its frames and all of its walls), in the local repository. Older `projects.json` stores are split into this folder automatically on the next launch. The **Projects** tab lets you reopen projects or use the thumbnail’s ••• menu to rename and delete them. Frames can be removed from the right rail with their × button; this also removes their placed copies.
 
-Projects saved by older single-wall versions open as a project with one wall. Deleted projects are moved to `.gallery-wall-data/backups/` and their ids are recorded in `.gallery-wall-data/deleted.json`, so a stale copy in another browser profile is removed rather than restored. A delete made while the server is unreachable is retried on the next launch.
+Projects saved by older single-wall versions open as a project with one wall. Deleted projects are moved to `.gallery-wall-data/backups/` and their ids are recorded in `.gallery-wall-data/deleted.json`.
 
-The data directory is intentionally gitignored because it contains the uploaded photos. Saved projects are available from any browser profile or port running this repository. On every launch, the app reconciles that profile's browser backup with the shared repo-backed store, so older browser-only projects are copied over automatically.
+Projects are saved only in the repo, never in the browser, so they're the same from any browser, profile, or port running this repository. The local server must be running for changes to save: if a save fails (for example, the server was stopped), a notice appears, the app keeps retrying, and the browser warns before you close the page with unsaved changes. Older versions also kept copies in the browser; on launch, any such copies are moved into the repo and then removed from the browser.
+
+The data directory is intentionally gitignored because it contains the uploaded photos.
 
 ## Privacy
 
