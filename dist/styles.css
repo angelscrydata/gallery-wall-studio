@@ -208,3 +208,5 @@ dialog form > p:not(.eyebrow) { color: var(--muted); line-height: 1.5; }
   .keyboard-note { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.save-warning { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; max-width: min(560px, calc(100vw - 32px)); padding: 10px 14px; background: var(--ink); color: var(--white); font-size: .78rem; line-height: 1.4; box-shadow: 0 10px 28px rgba(23,23,21,.2); }
+.save-warning[hidden] { display: none; }

@@ -72,9 +72,19 @@ async function putServerProject(project) {
 
 async function putProject(project) {
   await putLocalProject(project);
-  try { await putServerProject(project); }
-  catch (error) { console.warn('Repo-backed storage is unavailable; saved in this browser only.', error); }
+  try { await putServerProject(project); hideSaveWarning(); }
+  catch (error) { console.warn('Repo-backed storage is unavailable; saved in this browser only.', error); showSaveWarning(error); }
 }
+
+// Saving to the repo can fail silently otherwise (server stopped, project too large), leaving work in this browser only.
+const saveWarning = document.createElement('div');
+saveWarning.className = 'save-warning'; saveWarning.hidden = true; saveWarning.setAttribute('role', 'status');
+document.body.append(saveWarning);
+function showSaveWarning(error) {
+  const reason = /too large/i.test(error?.message || '') ? error.message : 'The local server could not be reached.';
+  saveWarning.textContent = `Saved in this browser only, not to the repo. ${reason}`; saveWarning.hidden = false;
+}
+function hideSaveWarning() { saveWarning.hidden = true; }
 
 const pendingDeletesKey = 'gallery-wall-pending-deletes';
 function readPendingDeletes() { try { return JSON.parse(localStorage.getItem(pendingDeletesKey)) || []; } catch { return []; } }

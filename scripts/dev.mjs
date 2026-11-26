@@ -54,17 +54,17 @@ async function readProjects() {
 
 const readDeletedIds = () => readJson(deletedFile, []);
 
+// Projects embed their photos as data URLs, so they can be large. Stay under V8's ~512 MB string limit,
+// and answer an oversized save with a clear 413 instead of dropping the connection.
+const maxBodyBytes = 450 * 1024 * 1024;
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
     const chunks = []; let size = 0;
-    request.on('data', chunk => {
-      size += chunk.length;
-      if (size > 100 * 1024 * 1024) { reject(new Error('Project is too large to save.')); request.destroy(); return; }
-      chunks.push(chunk);
-    });
+    request.on('data', chunk => { size += chunk.length; if (size <= maxBodyBytes) chunks.push(chunk); });
     request.on('end', () => {
+      if (size > maxBodyBytes) { reject(Object.assign(new Error(`Project is too large to save (${Math.round(size / 1048576)} MB; limit ${maxBodyBytes / 1048576} MB).`), { status: 413 })); return; }
       try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
-      catch { reject(new Error('Invalid JSON body.')); }
+      catch { reject(Object.assign(new Error('Invalid JSON body.'), { status: 400 })); }
     });
     request.on('error', reject);
   });
@@ -87,7 +87,7 @@ async function handleProjectsApi(request, response, pathname) {
       if (existing && (existing.updatedAt || 0) > (project.updatedAt || 0)) return existing;
       await writeJsonAtomic(projectFile(project.id), project); return project;
     });
-    sendJson(response, 200, saved); return true;
+    sendJson(response, 200, { id: saved.id, updatedAt: saved.updatedAt }); return true;
   }
   if (pathname.startsWith('/api/projects/') && request.method === 'DELETE') {
     const id = pathname.slice('/api/projects/'.length);
@@ -119,8 +119,9 @@ const server = createServer(async (request, response) => {
     response.writeHead(200, { 'Content-Type': types[extname(filePath).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     response.end(body);
   } catch (error) {
-    const status = request.url?.startsWith('/api/') ? 500 : 404;
-    response.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' }); response.end(status === 500 ? error.message : 'Not found');
+    const isApi = request.url?.startsWith('/api/'), status = isApi ? error.status || 500 : 404;
+    if (isApi) console.error(`${request.method} ${request.url} failed (${status}): ${error.message}`);
+    response.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' }); response.end(isApi ? error.message : 'Not found');
   }
 });
 
