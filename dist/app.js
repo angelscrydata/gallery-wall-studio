@@ -503,7 +503,8 @@ function renderLibrary() {
   const dimensions = state.art.map(art => ({ width: toCentimetres(art.width, art.unit), height: toCentimetres(art.height, art.unit) }));
   const maximum = Math.max(...dimensions.flatMap(size => [size.width, size.height]));
   const railPixelsPerCm = 140 / maximum;
-  state.art.forEach(art => {
+  // Newest frames first: state.art is stored oldest-first, so walk it backwards.
+  [...state.art].reverse().forEach(art => {
     const size = dimensions[state.art.indexOf(art)];
     const el = document.createElement('div'); el.className = 'library-frame'; el.draggable = true; el.tabIndex = 0;
     el.innerHTML = `<button class="library-delete" type="button" aria-label="Delete ${escapeHtml(art.name)}">×</button><div class="library-frame-preview" style="width:${size.width * railPixelsPerCm}px;height:${size.height * railPixelsPerCm}px"><img src="${art.url}" alt="${escapeHtml(art.name)}" style="${frameImageStyleText(art)}"></div><span>${art.width} × ${art.height} ${art.unit}</span>`;
