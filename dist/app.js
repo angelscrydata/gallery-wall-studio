@@ -3,7 +3,8 @@ const state = {
   wallUrl: null, naturalWidth: 0, naturalHeight: 0,
   scaleLine: null, pixelsPerUnit: null, unit: 'cm',
   art: [], placed: [], selectedId: null, zoom: 1,
-  projectId: null, projectName: null, updatedAt: null, showSpacing: false
+  projectId: null, projectName: null, updatedAt: null, showSpacing: false,
+  walls: [], activeWallId: null
 };
 
 const els = {
@@ -22,7 +23,7 @@ const els = {
   frameEditorDialog: $('#frameEditorDialog'), frameEditorForm: $('#frameEditorForm'), editorClose: $('#editorClose'),
   cropCanvas: $('#cropCanvas'), cropPolygon: $('#cropPolygon'), cropCorners: [...document.querySelectorAll('.crop-corner')], editorPreviewImage: $('#editorPreviewImage'),
   frameRotation: $('#frameRotation'), rotationOutput: $('#rotationOutput'), editorReset: $('#editorReset'),
-  rotateFrameButton: $('#rotateFrameButton')
+  rotateFrameButton: $('#rotateFrameButton'), wallTabs: $('#wallTabs'), wallTabList: $('#wallTabList'), addWallButton: $('#addWallButton')
 };
 
 function isHeic(file) {
@@ -126,42 +127,72 @@ async function deleteProject(id) {
 let saveTimer;
 function queueSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveCurrentProject, 250); }
 
-async function saveCurrentProject() {
-  if (!state.projectId || !state.wallUrl || !els.stage.clientWidth) return true;
+// A project shares one frame collection across several walls. Each wall has its own photo,
+// calibration, and placed frames. The active wall lives in `state` in on-screen pixels;
+// the other walls are kept in `state.walls` in stage-relative (0–1) coordinates.
+function blankWall(name) {
+  return { id: crypto.randomUUID(), name, wallUrl: null, naturalWidth: 0, naturalHeight: 0, unit: state.unit || 'cm', knownLength: null, pixelsPerUnit: null, scaleLine: null, placed: [] };
+}
+
+function activeWall() { return state.walls.find(wall => wall.id === state.activeWallId); }
+
+function serializeActiveWall() {
+  const wall = activeWall(); if (!wall) return;
+  wall.unit = state.unit; wall.knownLength = Number(els.knownLength.value) || null; wall.pixelsPerUnit = state.pixelsPerUnit;
+  if (!state.wallUrl) return;
   const stageWidth = els.stage.clientWidth, stageHeight = els.stage.clientHeight;
-  const project = {
-    id: state.projectId, name: state.projectName || 'Untitled wall', updatedAt: Date.now(), wallUrl: state.wallUrl,
-    naturalWidth: state.naturalWidth, naturalHeight: state.naturalHeight, unit: state.unit,
-    knownLength: Number(els.knownLength.value) || null, pixelsPerUnit: state.pixelsPerUnit,
+  if (!stageWidth || !stageHeight) return;
+  Object.assign(wall, {
+    wallUrl: state.wallUrl, naturalWidth: state.naturalWidth, naturalHeight: state.naturalHeight,
     scaleLine: state.scaleLine ? { x1: state.scaleLine.x1 / stageWidth, y1: state.scaleLine.y1 / stageHeight, x2: state.scaleLine.x2 / stageWidth, y2: state.scaleLine.y2 / stageHeight } : null,
-    art: state.art, placed: state.placed.map(item => ({ id: item.id, artId: item.artId, x: item.x / stageWidth, y: item.y / stageHeight, width: item.width / stageWidth, height: item.height / stageHeight, cropZoom: item.cropZoom || 1, cropX: item.cropX || 0, cropY: item.cropY || 0, rotation: item.rotation || 0 }))
+    placed: state.placed.map(item => ({ id: item.id, artId: item.artId, x: item.x / stageWidth, y: item.y / stageHeight, width: item.width / stageWidth, height: item.height / stageHeight }))
+  });
+}
+
+// Older saves held a single wall at the top level of the project.
+function normalizeProject(project) {
+  const art = (project.art || []).map(item => ({ ...item }));
+  let walls = project.walls;
+  if (!Array.isArray(walls) || !walls.length) {
+    (project.placed || []).forEach(item => {
+      const match = art.find(candidate => candidate.id === item.artId);
+      if (match && match.cropZoom === undefined && match.cropWidth === undefined) Object.assign(match, { cropZoom: item.cropZoom || 1, cropX: item.cropX || 0, cropY: item.cropY || 0, rotation: item.rotation || 0 });
+    });
+    walls = [{ id: `${project.id}-wall-1`, name: 'Wall 1', wallUrl: project.wallUrl || null, naturalWidth: project.naturalWidth || 0, naturalHeight: project.naturalHeight || 0, unit: project.unit || 'cm', knownLength: project.knownLength || null, pixelsPerUnit: project.pixelsPerUnit || null, scaleLine: project.scaleLine || null, placed: (project.placed || []).map(({ id, artId, x, y, width, height }) => ({ id, artId, x, y, width, height })) }];
+  }
+  walls = walls.map(wall => ({ ...wall, placed: (wall.placed || []).map(item => ({ ...item })) }));
+  const activeWallId = walls.some(wall => wall.id === project.activeWallId) ? project.activeWallId : walls[0].id;
+  return { id: project.id, name: project.name || 'Untitled project', updatedAt: project.updatedAt, art, walls, activeWallId };
+}
+
+function projectThumbnail(project) { return project.walls?.find(wall => wall.wallUrl)?.wallUrl || project.wallUrl || ''; }
+
+async function saveCurrentProject() {
+  if (!state.projectId) return true;
+  serializeActiveWall();
+  const project = {
+    id: state.projectId, name: state.projectName || 'Untitled project', updatedAt: Date.now(),
+    art: state.art, walls: state.walls.map(wall => ({ ...wall })), activeWallId: state.activeWallId
   };
   state.updatedAt = project.updatedAt;
   try { await putProject(project); if (!els.historyPanel.hidden) renderProjects(); return true; }
   catch (error) { console.warn('Could not save project', error); return false; }
 }
 
-async function loadWall(file, newProject = false) {
+function loadImage(url) {
+  return new Promise((resolve, reject) => { const probe = new Image(); probe.onload = () => resolve(probe); probe.onerror = () => reject(new Error('The photo could not be loaded.')); probe.src = url; });
+}
+
+async function loadWall(file) {
   if (!file) return;
-  const url = await readFile(file);
-  const probe = new Image();
-  probe.onload = () => {
-    if (newProject || !state.projectId) {
-      state.projectId = crypto.randomUUID(); state.projectName = file.name.replace(/\.[^.]+$/, '') || 'Untitled wall';
-      state.art = [];
-    }
-    state.wallUrl = url; state.naturalWidth = probe.naturalWidth; state.naturalHeight = probe.naturalHeight;
-    state.scaleLine = null; state.pixelsPerUnit = null; state.placed = []; state.zoom = 1; state.showSpacing = false;
-    els.wallImage.src = url; els.emptyState.hidden = true; els.stage.hidden = false;
-    fitStage(); clearMeasurement(); renderPlaced();
-    els.calibrationStep.classList.remove('is-disabled');
-    [els.drawScaleButton, els.knownLength, els.unitSelect].forEach(el => el.disabled = false);
-    els.applyScaleButton.disabled = true; els.artStep.classList.add('is-disabled'); els.artInput.disabled = true;
-    els.canvasHint.textContent = 'Next, draw across the object of known length'; els.wallInputLabel.textContent = 'Replace wall photo';
-    els.exportButton.disabled = false; els.zoomIn.disabled = false; els.zoomOut.disabled = false; els.spacingToggle.disabled = true; updateSpacingToggle(); setZoom(1);
-    renderLibrary(); queueSave();
-  };
-  probe.src = url;
+  const url = await readFile(file), probe = await loadImage(url);
+  if (!state.projectId) {
+    state.projectId = crypto.randomUUID(); state.projectName = file.name.replace(/\.[^.]+$/, '') || 'Untitled project';
+    state.art = []; const wall = blankWall('Wall 1'); state.walls = [wall]; state.activeWallId = wall.id;
+  }
+  // Replacing a wall's photo resets that wall's calibration and placements, not the shared frames.
+  Object.assign(activeWall(), { wallUrl: url, naturalWidth: probe.naturalWidth, naturalHeight: probe.naturalHeight, pixelsPerUnit: null, scaleLine: null, knownLength: null, placed: [] });
+  await showWall(activeWall()); queueSave();
 }
 
 function fitStage() {
@@ -171,27 +202,99 @@ function fitStage() {
   els.stage.style.height = `${Math.round(state.naturalHeight * ratio)}px`;
 }
 
-async function openSavedProject(project) {
-  const probe = new Image();
-  await new Promise((resolve, reject) => { probe.onload = resolve; probe.onerror = reject; probe.src = project.wallUrl; });
-  state.projectId = project.id; state.projectName = project.name; state.updatedAt = project.updatedAt;
-  state.wallUrl = project.wallUrl; state.naturalWidth = project.naturalWidth || probe.naturalWidth; state.naturalHeight = project.naturalHeight || probe.naturalHeight;
-  state.unit = project.unit || 'cm'; state.pixelsPerUnit = project.pixelsPerUnit || null; state.art = (project.art || []).map(art => ({ ...art })); state.zoom = 1; state.selectedId = null; state.showSpacing = false;
-  els.wallImage.src = state.wallUrl; els.emptyState.hidden = true; els.stage.hidden = false; fitStage();
-  const stageWidth = els.stage.clientWidth, stageHeight = els.stage.clientHeight;
-  state.scaleLine = project.scaleLine ? { x1: project.scaleLine.x1 * stageWidth, y1: project.scaleLine.y1 * stageHeight, x2: project.scaleLine.x2 * stageWidth, y2: project.scaleLine.y2 * stageHeight } : null;
-  (project.placed || []).forEach(item => {
-    const art = state.art.find(candidate => candidate.id === item.artId);
-    if (art && art.cropZoom === undefined) Object.assign(art, { cropZoom: item.cropZoom || 1, cropX: item.cropX || 0, cropY: item.cropY || 0, rotation: item.rotation || 0 });
+let wallSwitchToken = 0;
+async function showWall(wall) {
+  const token = wallSwitchToken += 1;
+  if (wall.wallUrl) await loadImage(wall.wallUrl);
+  if (token !== wallSwitchToken) return false;
+  state.activeWallId = wall.id; state.selectedId = null; state.showSpacing = false;
+  state.wallUrl = wall.wallUrl; state.naturalWidth = wall.naturalWidth; state.naturalHeight = wall.naturalHeight;
+  state.unit = wall.unit || 'cm'; state.pixelsPerUnit = wall.pixelsPerUnit || null;
+  els.knownLength.value = wall.knownLength || ''; els.unitSelect.value = state.unit; updateUnitLabels(); clearMeasurement();
+  const hasPhoto = Boolean(wall.wallUrl), calibrated = hasPhoto && Boolean(state.pixelsPerUnit);
+  els.emptyState.hidden = hasPhoto; els.stage.hidden = !hasPhoto;
+  if (hasPhoto) {
+    els.wallImage.src = wall.wallUrl; setZoom(1); fitStage();
+    const stageWidth = els.stage.clientWidth, stageHeight = els.stage.clientHeight;
+    state.scaleLine = wall.scaleLine ? { x1: wall.scaleLine.x1 * stageWidth, y1: wall.scaleLine.y1 * stageHeight, x2: wall.scaleLine.x2 * stageWidth, y2: wall.scaleLine.y2 * stageHeight } : null;
+    state.placed = (wall.placed || []).map(item => ({ id: item.id, artId: item.artId, x: item.x * stageWidth, y: item.y * stageHeight, width: item.width * stageWidth, height: item.height * stageHeight }));
+  } else { state.scaleLine = null; state.placed = []; els.wallImage.removeAttribute('src'); setZoom(1); }
+  els.calibrationStep.classList.toggle('is-disabled', !hasPhoto); [els.drawScaleButton, els.knownLength, els.unitSelect].forEach(el => el.disabled = !hasPhoto);
+  els.drawScaleButton.textContent = state.scaleLine ? 'Redraw measurement line' : 'Draw measurement line';
+  els.applyScaleButton.disabled = !(state.scaleLine && Number(els.knownLength.value) > 0);
+  els.scaleStatus.textContent = calibrated ? `Scale set · ${state.pixelsPerUnit.toFixed(1)} px per ${state.unit}` : '';
+  els.artStep.classList.toggle('is-disabled', !state.projectId); els.artInput.disabled = !state.projectId;
+  els.canvasHint.textContent = !hasPhoto ? `Choose a photo for ${wall.name}` : calibrated ? (state.art.length ? 'Drag frames from the right onto this wall' : 'Add framed art, then drag it onto the wall') : 'Next, draw across the object of known length on this wall';
+  els.wallInputLabel.textContent = hasPhoto ? 'Replace wall photo' : 'Choose wall photo';
+  els.exportButton.disabled = !hasPhoto; els.zoomIn.disabled = !hasPhoto; els.zoomOut.disabled = !hasPhoto; els.spacingToggle.disabled = !calibrated; updateSpacingToggle();
+  renderWallTabs(); renderLibrary(); renderPlaced();
+  return true;
+}
+
+async function switchWall(wallId) {
+  if (wallId === state.activeWallId) return;
+  const wall = state.walls.find(candidate => candidate.id === wallId); if (!wall) return;
+  serializeActiveWall();
+  try { if (await showWall(wall)) { switchSidebarTab('plan'); queueSave(); } }
+  catch (error) { window.alert(`Could not open ${wall.name}. ${error.message}`); }
+}
+
+async function addWall() {
+  if (!state.projectId) return;
+  serializeActiveWall();
+  const usedNumbers = state.walls.map(wall => Number(/^Wall (\d+)$/.exec(wall.name)?.[1]) || 0);
+  const wall = blankWall(`Wall ${Math.max(state.walls.length, ...usedNumbers) + 1}`);
+  state.walls.push(wall); await showWall(wall); switchSidebarTab('plan'); queueSave();
+}
+
+async function removeWall(wallId) {
+  const wall = state.walls.find(candidate => candidate.id === wallId); if (!wall || state.walls.length < 2) return;
+  if (!window.confirm(`Delete “${wall.name}”? Its photo and layout will be removed. Your frames stay in the project.`)) return;
+  serializeActiveWall();
+  const index = state.walls.indexOf(wall); state.walls.splice(index, 1);
+  if (wallId === state.activeWallId) await showWall(state.walls[Math.max(0, index - 1)]);
+  else renderWallTabs();
+  queueSave();
+}
+
+function renameWall(wallId, tab) {
+  const wall = state.walls.find(candidate => candidate.id === wallId); if (!wall) return;
+  const label = tab.querySelector('.wall-tab-name'), input = document.createElement('input');
+  input.className = 'wall-tab-input'; input.value = wall.name; input.maxLength = 40; input.setAttribute('aria-label', 'Wall name');
+  label.replaceWith(input); input.focus(); input.select();
+  let done = false;
+  const finish = save => {
+    if (done) return; done = true;
+    const name = input.value.trim(); if (save && name) { wall.name = name; queueSave(); }
+    renderWallTabs(); if (!state.wallUrl && wall.id === state.activeWallId) els.canvasHint.textContent = `Choose a photo for ${wall.name}`;
+  };
+  input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); finish(true); } else if (event.key === 'Escape') finish(false); });
+  input.addEventListener('blur', () => finish(true));
+}
+
+function renderWallTabs() {
+  els.wallTabs.hidden = !state.projectId;
+  els.wallTabList.replaceChildren();
+  state.walls.forEach(wall => {
+    const active = wall.id === state.activeWallId;
+    const tab = document.createElement('div'); tab.className = `wall-tab${active ? ' is-active' : ''}`;
+    tab.innerHTML = `<button class="wall-tab-select" type="button" role="tab" aria-selected="${active}" title="${escapeHtml(wall.name)} · double-click to rename"><span class="wall-tab-dot${wall.pixelsPerUnit ? ' is-set' : ''}" aria-hidden="true"></span><span class="wall-tab-name">${escapeHtml(wall.name)}</span></button>${state.walls.length > 1 ? `<button class="wall-tab-close" type="button" aria-label="Delete ${escapeHtml(wall.name)}">×</button>` : ''}`;
+    const select = tab.querySelector('.wall-tab-select');
+    select.addEventListener('click', () => switchWall(wall.id));
+    select.addEventListener('dblclick', () => renameWall(wall.id, tab));
+    tab.querySelector('.wall-tab-close')?.addEventListener('click', () => removeWall(wall.id));
+    els.wallTabList.append(tab);
   });
-  state.placed = (project.placed || []).map(item => ({ id: item.id, artId: item.artId, x: item.x * stageWidth, y: item.y * stageHeight, width: item.width * stageWidth, height: item.height * stageHeight }));
-  els.knownLength.value = project.knownLength || ''; els.unitSelect.value = state.unit; updateUnitLabels(); clearMeasurement();
-  els.calibrationStep.classList.remove('is-disabled'); [els.drawScaleButton, els.knownLength, els.unitSelect].forEach(el => el.disabled = false);
-  els.applyScaleButton.disabled = !state.scaleLine; els.artStep.classList.toggle('is-disabled', !state.pixelsPerUnit); els.artInput.disabled = !state.pixelsPerUnit;
-  els.scaleStatus.textContent = state.pixelsPerUnit ? `Scale set · ${state.pixelsPerUnit.toFixed(1)} px per ${state.unit}` : '';
-  els.canvasHint.textContent = state.pixelsPerUnit ? 'Add framed art, then drag it onto the wall' : 'Next, draw across the object of known length';
-  els.wallInputLabel.textContent = 'Replace wall photo'; els.exportButton.disabled = false; els.zoomIn.disabled = false; els.zoomOut.disabled = false; els.spacingToggle.disabled = !state.pixelsPerUnit; updateSpacingToggle(); setZoom(1);
-  renderLibrary(); renderPlaced(); switchSidebarTab('plan');
+}
+
+async function openSavedProject(savedProject) {
+  const project = normalizeProject(savedProject);
+  const wall = project.walls.find(candidate => candidate.id === project.activeWallId);
+  if (state.projectId && state.projectId !== project.id) { clearTimeout(saveTimer); await saveCurrentProject(); }
+  state.projectId = project.id; state.projectName = project.name; state.updatedAt = project.updatedAt;
+  state.art = project.art; state.walls = project.walls;
+  try { await showWall(wall); } catch (error) { window.alert(`Could not open ${project.name}. ${error.message}`); }
+  switchSidebarTab('plan');
 }
 
 function switchSidebarTab(tab) {
@@ -205,11 +308,11 @@ function switchSidebarTab(tab) {
 async function renderProjects() {
   let projects = [];
   try { projects = (await getAllProjects()).sort((a, b) => b.updatedAt - a.updatedAt); } catch (error) { console.warn('Could not load projects', error); }
-  if (!projects.length) { els.projectLibrary.innerHTML = '<p class="empty-projects">Walls you work on will appear here automatically.</p>'; return; }
+  if (!projects.length) { els.projectLibrary.innerHTML = '<p class="empty-projects">Projects you work on will appear here automatically.</p>'; return; }
   els.projectLibrary.innerHTML = '';
   projects.forEach(project => {
     const card = document.createElement('article'); card.className = 'project-card';
-    card.innerHTML = `<button class="project-open" type="button"><img class="project-thumb" src="${project.wallUrl}" alt=""><span class="project-meta"><span class="project-name">${escapeHtml(project.name)}</span><span class="project-date">${formatProjectDate(project.updatedAt)}</span></span></button><div class="project-menu"><button class="project-menu-trigger" type="button" aria-label="Actions for ${escapeHtml(project.name)}" aria-expanded="false">•••</button><div class="project-menu-popover" hidden><button class="project-rename" type="button">Rename</button><button class="project-delete" type="button">Delete</button></div></div>`;
+    card.innerHTML = `<button class="project-open" type="button"><img class="project-thumb" src="${projectThumbnail(project)}" alt=""><span class="project-meta"><span class="project-name">${escapeHtml(project.name)}</span><span class="project-date">${formatProjectDate(project.updatedAt)} · ${wallCountLabel(project)}</span></span></button><div class="project-menu"><button class="project-menu-trigger" type="button" aria-label="Actions for ${escapeHtml(project.name)}" aria-expanded="false">•••</button><div class="project-menu-popover" hidden><button class="project-rename" type="button">Rename</button><button class="project-delete" type="button">Delete</button></div></div>`;
     card.querySelector('.project-open').onclick = () => openSavedProject(project);
     const menuTrigger = card.querySelector('.project-menu-trigger'), menu = card.querySelector('.project-menu-popover');
     menuTrigger.onclick = event => {
@@ -222,7 +325,7 @@ async function renderProjects() {
     card.querySelector('.project-delete').onclick = async () => {
       if (!window.confirm(`Delete “${project.name}”? This cannot be undone.`)) return;
       await deleteProject(project.id);
-      if (state.projectId === project.id) state.projectId = null;
+      if (state.projectId === project.id) { clearTimeout(saveTimer); state.projectId = null; location.reload(); return; }
       renderProjects();
     };
     els.projectLibrary.append(card);
@@ -241,6 +344,8 @@ function showRenameForm(card, project) {
     renderProjects();
   };
 }
+
+function wallCountLabel(project) { const count = project.walls?.length || 1; return `${count} wall${count === 1 ? '' : 's'}`; }
 
 function formatProjectDate(timestamp) {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(timestamp));
@@ -289,8 +394,7 @@ els.knownLength.addEventListener('input', () => { els.applyScaleButton.disabled 
 els.unitSelect.addEventListener('change', () => {
   updateUnitLabels();
   if (state.pixelsPerUnit) {
-    state.pixelsPerUnit = null;
-    els.artStep.classList.add('is-disabled'); els.artInput.disabled = true;
+    state.pixelsPerUnit = null; renderWallTabs();
     state.showSpacing = false; els.spacingToggle.disabled = true; updateSpacingToggle();
     els.scaleStatus.textContent = 'Unit changed · apply the scale again.';
   }
@@ -313,8 +417,8 @@ els.applyScaleButton.addEventListener('click', () => {
   [els.measurementLine, els.measureStart, els.measureEnd].forEach(el => el.setAttribute('visibility', 'hidden'));
   els.artStep.classList.remove('is-disabled'); els.artInput.disabled = false;
   els.spacingToggle.disabled = false;
-  els.canvasHint.textContent = 'Add framed art, then drag it onto the wall';
-  queueSave();
+  els.canvasHint.textContent = state.art.length ? 'Drag frames from the right onto this wall' : 'Add framed art, then drag it onto the wall';
+  serializeActiveWall(); renderWallTabs(); queueSave();
 });
 
 els.artInput.addEventListener('change', async () => {
@@ -363,9 +467,10 @@ function toCentimetres(value, unit) { return unit === 'in' ? value * 2.54 : valu
 
 function removeArt(artId) {
   const art = state.art.find(candidate => candidate.id === artId); if (!art) return;
-  if (!window.confirm(`Delete “${art.name}” and remove it from this wall?`)) return;
+  if (!window.confirm(`Delete “${art.name}” from this project? It will be removed from every wall.`)) return;
   state.art = state.art.filter(candidate => candidate.id !== artId);
   state.placed = state.placed.filter(item => item.artId !== artId);
+  state.walls.forEach(wall => { wall.placed = (wall.placed || []).filter(item => item.artId !== artId); });
   renderLibrary(); renderPlaced(); queueSave();
 }
 
@@ -376,6 +481,7 @@ els.stage.addEventListener('drop', e => {
 });
 function placeArt(artId, centerX, centerY) {
   const art = state.art.find(a => a.id === artId); if (!art) return;
+  if (!state.pixelsPerUnit) { els.canvasHint.textContent = 'Set the scale for this wall before placing frames'; els.calibrationStep.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); return; }
   const naturalToDisplay = els.stage.clientWidth / state.naturalWidth;
   const unitFactor = art.unit === state.unit ? 1 : art.unit === 'in' ? 2.54 : 1 / 2.54;
   const width = art.width * unitFactor * state.pixelsPerUnit * naturalToDisplay, height = art.height * unitFactor * state.pixelsPerUnit * naturalToDisplay;
@@ -585,6 +691,7 @@ els.frameEditorForm.addEventListener('submit', async event => {
     art.cropLeft = 0; art.cropTop = 0; art.cropWidth = 1; art.cropHeight = 1; art.rotation = Number(els.frameRotation.value);
     if (dimensionsSwapped) rotatePlacedCopies(art.id);
     else if (!nearlyEqual(oldWidth, art.width) || !nearlyEqual(oldHeight, art.height)) resizePlacedCopies(art);
+    if (dimensionsSwapped || !nearlyEqual(oldWidth, art.width) || !nearlyEqual(oldHeight, art.height)) resizeOnOtherWalls(art);
     els.frameEditorDialog.close(); renderLibrary(); renderPlaced(); queueSave();
   } catch (error) { window.alert(`Could not straighten this frame. ${error.message}`); }
   finally { submitButton.disabled = false; submitButton.textContent = 'Apply'; }
@@ -675,6 +782,20 @@ function resizePlacedCopies(art) {
   });
 }
 
+// Other walls store placements as fractions of their photo, so size frames from each wall's own calibration.
+function resizeOnOtherWalls(art) {
+  state.walls.forEach(wall => {
+    if (wall.id === state.activeWallId || !wall.pixelsPerUnit || !wall.naturalWidth) return;
+    const unitFactor = art.unit === wall.unit ? 1 : art.unit === 'in' ? 2.54 : 1 / 2.54;
+    const width = art.width * unitFactor * wall.pixelsPerUnit / wall.naturalWidth, height = art.height * unitFactor * wall.pixelsPerUnit / wall.naturalHeight;
+    (wall.placed || []).filter(item => item.artId === art.id).forEach(item => {
+      const centerX = item.x + item.width / 2, centerY = item.y + item.height / 2;
+      item.width = width; item.height = height;
+      item.x = clamp(centerX - width / 2, 0, Math.max(0, 1 - width)); item.y = clamp(centerY - height / 2, 0, Math.max(0, 1 - height));
+    });
+  });
+}
+
 let drag = null;
 function beginFrameDrag(event) {
   const item = state.placed.find(p => p.id === event.currentTarget.dataset.id); if (!item) return;
@@ -760,7 +881,7 @@ async function exportWall() {
     ensureCrop(art); ctx.translate(x + width / 2, y + height / 2); ctx.rotate((art.rotation || 0) * Math.PI / 180);
     ctx.drawImage(img, art.cropLeft * img.naturalWidth, art.cropTop * img.naturalHeight, art.cropWidth * img.naturalWidth, art.cropHeight * img.naturalHeight, -width / 2, -height / 2, width, height); ctx.restore();
   }
-  const link = document.createElement('a'); link.download = 'gallery-wall-plan.png'; link.href = canvas.toDataURL('image/png'); link.click();
+  const link = document.createElement('a'); link.download = `${[state.projectName, activeWall()?.name].filter(Boolean).join(' - ').replace(/[\\/:*?"<>|]+/g, '').trim() || 'gallery-wall-plan'}.png`; link.href = canvas.toDataURL('image/png'); link.click();
 }
 function imageFromUrl(url, label = 'an image') {
   return new Promise((resolve, reject) => {
@@ -784,12 +905,13 @@ els.confirmDialog.addEventListener('close', async () => {
   }
   location.reload();
 });
-async function handleWallFile(file, newProject) {
-  try { await loadWall(file, newProject); }
+async function handleWallFile(file) {
+  try { await loadWall(file); }
   catch (error) { window.alert(`Could not open ${file?.name || 'that photo'}. ${error.message}`); }
 }
-els.wallInput.addEventListener('change', () => handleWallFile(els.wallInput.files[0], false));
-els.wallInputEmpty.addEventListener('change', () => handleWallFile(els.wallInputEmpty.files[0], true));
+els.wallInput.addEventListener('change', () => { handleWallFile(els.wallInput.files[0]); els.wallInput.value = ''; });
+els.wallInputEmpty.addEventListener('change', () => { handleWallFile(els.wallInputEmpty.files[0]); els.wallInputEmpty.value = ''; });
+els.addWallButton.addEventListener('click', addWall);
 els.planTab.addEventListener('click', () => switchSidebarTab('plan'));
 els.historyTab.addEventListener('click', () => switchSidebarTab('history'));
 els.gridViewButton.addEventListener('click', () => setProjectView('grid'));

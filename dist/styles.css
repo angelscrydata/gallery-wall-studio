@@ -114,6 +114,23 @@ input[type="number"], select { width: 100%; border: 1px solid var(--line); backg
 .zoom-controls button:disabled { opacity: .3; }
 .zoom-controls span { min-width: 54px; text-align: center; font-size: .72rem; }
 .stage-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; overscroll-behavior: contain; padding: 24px; background-color: #ebe7de; background-image: radial-gradient(#d1cbc0 1px, transparent 1px); background-size: 16px 16px; border: 1px solid var(--line); }
+.wall-tabs { display: flex; align-items: flex-end; gap: 2px; margin-top: 6px; min-width: 0; }
+.wall-tab-list { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.wall-tab-list::-webkit-scrollbar { display: none; }
+.wall-tab { position: relative; display: flex; align-items: center; flex: 0 1 190px; min-width: 124px; height: 34px; border: 1px solid var(--line); border-bottom: 0; border-radius: 9px 9px 0 0; background: var(--panel); color: var(--muted); margin-bottom: -1px; }
+.wall-tab:hover { color: var(--ink); }
+.wall-tab.is-active { background: #ebe7de; color: var(--ink); z-index: 1; height: 37px; }
+.wall-tab-select { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 8px; border: 0; background: transparent; color: inherit; padding: 0 6px 0 13px; cursor: pointer; font: inherit; font-size: .74rem; text-align: left; }
+.wall-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wall-tab-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; border: 1px solid currentColor; opacity: .55; }
+.wall-tab-dot.is-set { background: currentColor; opacity: .8; }
+.wall-tab-close { flex: none; width: 22px; height: 22px; margin-right: 6px; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; font-size: .95rem; line-height: 1; opacity: 0; }
+.wall-tab:hover .wall-tab-close, .wall-tab.is-active .wall-tab-close, .wall-tab-close:focus-visible { opacity: .6; }
+.wall-tab-close:hover { opacity: 1; background: rgba(23,23,21,.08); }
+.wall-tab-input { flex: 1; min-width: 0; margin: 0 8px 0 10px; height: 24px; border: 1px solid var(--line); background: var(--white); padding: 0 6px; font: inherit; font-size: .74rem; color: var(--ink); }
+.wall-tab-add { flex: none; width: 30px; height: 30px; margin: 0 0 3px 4px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; font-size: 1.15rem; line-height: 1; }
+.wall-tab-add:hover { background: var(--panel); color: var(--ink); }
+.wall-tabs[hidden] { display: none; }
 .stage-wrap.is-zoomed { align-items: flex-start; justify-content: flex-start; }
 .stage-wrap.is-zoomed .stage { cursor: grab; }
 .stage-wrap.is-panning .stage { cursor: grabbing; }
