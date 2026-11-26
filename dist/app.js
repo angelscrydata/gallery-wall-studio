@@ -23,7 +23,7 @@ const els = {
   frameEditorDialog: $('#frameEditorDialog'), frameEditorForm: $('#frameEditorForm'), editorClose: $('#editorClose'),
   cropCanvas: $('#cropCanvas'), cropPolygon: $('#cropPolygon'), cropCorners: [...document.querySelectorAll('.crop-corner')], editorPreviewImage: $('#editorPreviewImage'),
   frameRotation: $('#frameRotation'), rotationOutput: $('#rotationOutput'), editorReset: $('#editorReset'),
-  rotateFrameButton: $('#rotateFrameButton'), selectionStatus: $('#selectionStatus'), wallTabs: $('#wallTabs'), wallTabList: $('#wallTabList'), addWallButton: $('#addWallButton')
+  rotateFrameButton: $('#rotateFrameButton'), selectionStatus: $('#selectionStatus'), undoButton: $('#undoButton'), redoButton: $('#redoButton'), wallTabs: $('#wallTabs'), wallTabList: $('#wallTabList'), addWallButton: $('#addWallButton')
 };
 
 function isHeic(file) {
@@ -125,7 +125,12 @@ async function deleteProject(id) {
   catch (error) { console.warn('Could not reach repo-backed storage; the delete will sync next time.', error); }
 }
 let saveTimer;
-function queueSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveCurrentProject, 250); }
+// Every edit calls queueSave, which also records an undo step (unless `record: false`).
+// `coalesce` merges rapid repeats of the same kind of edit (arrow nudges, typing a length) into one step.
+function queueSave({ record = true, coalesce = null } = {}) {
+  if (record) recordHistory(coalesce);
+  clearTimeout(saveTimer); saveTimer = setTimeout(saveCurrentProject, 250);
+}
 
 // A project shares one frame collection across several walls. Each wall has its own photo,
 // calibration, and placed frames. The active wall lives in `state` in on-screen pixels;
@@ -189,6 +194,7 @@ async function loadWall(file) {
   if (!state.projectId) {
     state.projectId = crypto.randomUUID(); state.projectName = file.name.replace(/\.[^.]+$/, '') || 'Untitled project';
     state.art = []; const wall = blankWall('Wall 1'); state.walls = [wall]; state.activeWallId = wall.id;
+    clearHistory();
   }
   // Replacing a wall's photo resets that wall's calibration and placements, not the shared frames.
   Object.assign(activeWall(), { wallUrl: url, naturalWidth: probe.naturalWidth, naturalHeight: probe.naturalHeight, pixelsPerUnit: null, scaleLine: null, knownLength: null, placed: [] });
@@ -235,7 +241,7 @@ async function switchWall(wallId) {
   if (wallId === state.activeWallId) return;
   const wall = state.walls.find(candidate => candidate.id === wallId); if (!wall) return;
   serializeActiveWall();
-  try { if (await showWall(wall)) { switchSidebarTab('plan'); queueSave(); } }
+  try { if (await showWall(wall)) { switchSidebarTab('plan'); queueSave({ record: false }); } }
   catch (error) { window.alert(`Could not open ${wall.name}. ${error.message}`); }
 }
 
@@ -294,7 +300,7 @@ async function openSavedProject(savedProject) {
   state.projectId = project.id; state.projectName = project.name; state.updatedAt = project.updatedAt;
   state.art = project.art; state.walls = project.walls;
   try { await showWall(wall); } catch (error) { window.alert(`Could not open ${project.name}. ${error.message}`); }
-  switchSidebarTab('plan');
+  resetHistory(); switchSidebarTab('plan');
 }
 
 function switchSidebarTab(tab) {
@@ -390,7 +396,7 @@ els.measurementLayer.addEventListener('pointerup', (event) => {
   if (distance > 8) { state.scaleLine = measureDraft; els.applyScaleButton.disabled = !(Number(els.knownLength.value) > 0); els.scaleStatus.textContent = 'Line set. Enter the real length.'; queueSave(); }
   measureDraft = null; els.measurementLayer.classList.remove('is-drawing'); els.drawScaleButton.textContent = 'Redraw measurement line';
 });
-els.knownLength.addEventListener('input', () => { els.applyScaleButton.disabled = !(state.scaleLine && Number(els.knownLength.value) > 0); queueSave(); });
+els.knownLength.addEventListener('input', () => { els.applyScaleButton.disabled = !(state.scaleLine && Number(els.knownLength.value) > 0); queueSave({ coalesce: 'known-length' }); });
 els.unitSelect.addEventListener('change', () => {
   updateUnitLabels();
   if (state.pixelsPerUnit) {
@@ -913,8 +919,98 @@ document.addEventListener('keydown', event => {
   const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key]; if (!moves) return;
   event.preventDefault();
   const { dx, dy } = clampGroupDelta(items, moves[0], moves[1]);
-  items.forEach(item => { item.x += dx; item.y += dy; }); renderPlaced(); queueSave();
+  items.forEach(item => { item.x += dx; item.y += dy; }); renderPlaced(); queueSave({ coalesce: 'nudge' });
 });
+
+// ---- Undo / redo ------------------------------------------------------------
+// History holds snapshots of the project's content (frames + every wall) after each edit.
+// Image data URLs are shared strings, so snapshots are cheap. Each entry remembers which wall
+// was showing, so undo/redo jumps to the wall where the change happened.
+const undoHistory = { entries: [], index: -1, coalesceKey: null, coalesceAt: 0, busy: false };
+const HISTORY_LIMIT = 100;
+
+function cloneContent(source) {
+  return {
+    art: source.art.map(art => ({ ...art, cropCorners: art.cropCorners?.map(point => ({ ...point })) })),
+    walls: source.walls.map(wall => ({ ...wall, scaleLine: wall.scaleLine ? { ...wall.scaleLine } : null, placed: (wall.placed || []).map(item => ({ ...item })) }))
+  };
+}
+
+// Positions round-trip through on-screen pixels, so compare numbers with a small tolerance.
+function sameValue(a, b) {
+  if (a === b) return true;
+  if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) < 1e-6;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a); if (keys.length !== Object.keys(b).length) return false;
+  return keys.every(key => sameValue(a[key], b[key]));
+}
+
+function clearHistory() { undoHistory.entries = []; undoHistory.index = -1; undoHistory.coalesceKey = null; updateHistoryButtons(); }
+
+function resetHistory() {
+  serializeActiveWall();
+  undoHistory.entries = [{ ...cloneContent(state), wallId: state.activeWallId }]; undoHistory.index = 0; undoHistory.coalesceKey = null; updateHistoryButtons();
+}
+
+function recordHistory(coalesceKey) {
+  if (!state.projectId || undoHistory.busy) return;
+  if (undoHistory.index < 0) { resetHistory(); return; }
+  serializeActiveWall();
+  const content = cloneContent(state), current = undoHistory.entries[undoHistory.index];
+  if (sameValue(content, { art: current.art, walls: current.walls })) return;
+  const entry = { ...content, wallId: state.activeWallId }, now = Date.now();
+  const atEnd = undoHistory.index === undoHistory.entries.length - 1;
+  if (coalesceKey && coalesceKey === undoHistory.coalesceKey && atEnd && undoHistory.index > 0 && now - undoHistory.coalesceAt < 1500) undoHistory.entries[undoHistory.index] = entry;
+  else {
+    undoHistory.entries.splice(undoHistory.index + 1); undoHistory.entries.push(entry);
+    if (undoHistory.entries.length > HISTORY_LIMIT) undoHistory.entries.shift();
+    undoHistory.index = undoHistory.entries.length - 1;
+  }
+  undoHistory.coalesceKey = coalesceKey; undoHistory.coalesceAt = now; updateHistoryButtons();
+}
+
+async function applyHistory(targetIndex, wallId) {
+  if (undoHistory.busy || drag || marquee) return;
+  undoHistory.busy = true;
+  const entry = undoHistory.entries[targetIndex], content = cloneContent(entry);
+  const previousWallId = state.activeWallId, previousSelection = [...state.selection];
+  const zoom = state.zoom, scroll = [els.stageWrap.scrollLeft, els.stageWrap.scrollTop];
+  try {
+    undoHistory.index = targetIndex; undoHistory.coalesceKey = null;
+    state.art = content.art; state.walls = content.walls;
+    const wall = state.walls.find(candidate => candidate.id === wallId) || state.walls.find(candidate => candidate.id === entry.wallId) || state.walls[0];
+    els.frameEditorDialog.open && els.frameEditorDialog.close();
+    await showWall(wall);
+    if (wall.id === previousWallId) {
+      // Stay where the user was looking, and keep any selected frames that still exist.
+      setZoom(zoom); els.stageWrap.scrollLeft = scroll[0]; els.stageWrap.scrollTop = scroll[1];
+      setSelection(previousSelection.filter(id => state.placed.some(item => item.id === id)));
+    }
+  } catch (error) { console.warn('Could not restore that step.', error); }
+  finally { undoHistory.busy = false; updateHistoryButtons(); queueSave({ record: false }); }
+}
+
+function undo() { if (undoHistory.index > 0) applyHistory(undoHistory.index - 1, undoHistory.entries[undoHistory.index].wallId); }
+function redo() { if (undoHistory.index < undoHistory.entries.length - 1) applyHistory(undoHistory.index + 1, undoHistory.entries[undoHistory.index + 1].wallId); }
+
+const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+';
+function updateHistoryButtons() {
+  if (!els.undoButton) return;
+  els.undoButton.disabled = undoHistory.index <= 0; els.redoButton.disabled = undoHistory.index < 0 || undoHistory.index >= undoHistory.entries.length - 1;
+  els.undoButton.title = `Undo (${shortcutModifier}Z)`; els.redoButton.title = `Redo (${shortcutModifier === '⌘' ? '⇧⌘Z' : 'Ctrl+Shift+Z'})`;
+}
+els.undoButton.addEventListener('click', undo); els.redoButton.addEventListener('click', redo);
+
+// ⌘Z / Ctrl+Z undo; ⇧⌘Z, Ctrl+Shift+Z or Ctrl+Y redo. Text fields keep their own native undo.
+document.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+  const key = event.key.toLowerCase(), isUndo = key === 'z' && !event.shiftKey, isRedo = (key === 'z' && event.shiftKey) || (key === 'y' && event.ctrlKey && !event.metaKey);
+  if (!isUndo && !isRedo) return;
+  const active = document.activeElement;
+  if (document.querySelector('dialog[open]') || (active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.isContentEditable))) return;
+  event.preventDefault(); if (isUndo) undo(); else redo();
+});
+updateHistoryButtons();
 
 function setZoom(value) {
   state.zoom = Math.max(.5, Math.min(5, value));

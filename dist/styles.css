@@ -113,6 +113,12 @@ input[type="number"], select { width: 100%; border: 1px solid var(--line); backg
 .spacing-toggle { min-height: 32px; border: 1px solid var(--line); background: var(--panel); padding: 0 11px; cursor: pointer; font-size: .7rem; }
 .spacing-toggle[aria-pressed="true"] { background: var(--ink); color: var(--white); border-color: var(--ink); }
 .spacing-toggle:disabled { opacity: .35; cursor: not-allowed; }
+.history-controls { display: flex; align-items: center; border: 1px solid var(--line); background: var(--panel); }
+.history-controls button { border: 0; background: transparent; width: 34px; height: 30px; cursor: pointer; display: grid; place-items: center; color: var(--ink); }
+.history-controls button + button { border-left: 1px solid var(--line); }
+.history-controls button:hover:not(:disabled) { background: rgba(23,23,21,.06); }
+.history-controls button:disabled { opacity: .3; cursor: default; }
+.history-controls svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .zoom-controls { display: flex; align-items: center; border: 1px solid var(--line); background: var(--panel); }
 .zoom-controls button { border: 0; background: transparent; width: 34px; height: 30px; cursor: pointer; }
 .zoom-controls button:disabled { opacity: .3; }
